@@ -1,0 +1,32 @@
+#######################################
+# Syntax Coloring Map For CellComms
+#######################################
+
+#######################################
+# Datatypes (KEYWORD1)
+#######################################
+
+CellComms			KEYWORD1
+
+#######################################
+# Methods and Functions (KEYWORD2)
+#######################################
+
+sendMillivolts    	KEYWORD2
+readCells    		KEYWORD2
+getCellsAveV    	KEYWORD2
+getCellsMinV    	KEYWORD2
+getCellsMaxV    	KEYWORD2
+getCellsAveT    	KEYWORD2
+getCellsMinT    	KEYWORD2
+getCellsMaxT    	KEYWORD2
+getCellsBalancing   KEYWORD2
+getCellsOverVolt	KEYWORD2
+getCellsUnderVolt	KEYWORD2
+getCellsOverTemp	KEYWORD2
+
+#######################################
+# Constants (LITERAL1)
+#######################################
+
+NUM_CELLS			LITERAL1
