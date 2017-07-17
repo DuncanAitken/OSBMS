@@ -24,6 +24,10 @@ getCellsBalancing   KEYWORD2
 getCellsOverVolt	KEYWORD2
 getCellsUnderVolt	KEYWORD2
 getCellsOverTemp	KEYWORD2
+getMinVCell			KEYWORD2
+getMaxVCell			KEYWORD2
+getMinTCell			KEYWORD2
+getMaxTCell			KEYWORD2
 
 #######################################
 # Constants (LITERAL1)

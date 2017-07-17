@@ -38,6 +38,10 @@ struct _cellData
 } _cellDataArray[NUM_CELLS];
 
 byte cellsRead;
+byte minVIndex;
+byte maxVIndex;
+byte minTIndex;
+byte maxTIndex;
 	
 
 // Constructor
@@ -156,7 +160,7 @@ int CellComms::readCells(void)
 ***********************************************************/
 int CellComms::getCellsAveV(void)
 {
-	int aveVal			= 0;
+	long aveVal			= 0;
 	
 	if (cellsRead > NUM_CELLS) {
 		cellsRead		= NUM_CELLS;
@@ -167,7 +171,7 @@ int CellComms::getCellsAveV(void)
 		aveVal			+= _cellDataArray[i].millivolts;
 	}
 	
-	return (aveVal / cellsRead);
+	return (int) (aveVal / cellsRead);
 } // end of getCellsAveV -----------------------------------
 
 
@@ -187,6 +191,7 @@ int CellComms::getCellsMinV(void)
 		if (minVal > _cellDataArray[i].millivolts)
 		{
 			minVal		= _cellDataArray[i].millivolts;
+			minVIndex	= i;
 		}
 	}
 	
@@ -210,6 +215,7 @@ int CellComms::getCellsMaxV(void)
 		if (maxVal < _cellDataArray[i].millivolts)
 		{
 			maxVal		= _cellDataArray[i].millivolts;
+			maxVIndex	= i;
 		}
 	}
 	
@@ -253,6 +259,7 @@ int CellComms::getCellsMinT(void)
 		if (minVal > _cellDataArray[i].temperature)
 		{
 			minVal		= _cellDataArray[i].temperature;
+			minTIndex	= i;
 		}
 	}
 	
@@ -276,6 +283,7 @@ int CellComms::getCellsMaxT(void)
 		if (maxVal < _cellDataArray[i].temperature)
 		{
 			maxVal		= _cellDataArray[i].temperature;
+			maxTIndex	= i;
 		}
 	}
 	
@@ -373,6 +381,42 @@ int CellComms::getCellsOverTemp(void)
 	
 	return count;
 } // end of getCellsOverTemp -------------------------------
+
+
+/***********************************************************
+	@brief	returns the index of the minimum Voltage Cell.
+***********************************************************/
+int CellComms::getMinVCell(void)
+{
+	return (minVIndex + 1);
+} // end of getMinVCell ------------------------------------
+
+
+/***********************************************************
+	@brief	returns the index of the maximum Voltage Cell.
+***********************************************************/
+int CellComms::getMaxVCell(void)
+{
+	return (maxVIndex + 1);
+} // end of getMaxVCell ------------------------------------
+
+
+/***********************************************************
+	@brief	returns the index of the minimum temperature Cell.
+***********************************************************/
+int CellComms::getMinTCell(void)
+{
+	return (minTIndex + 1);
+} // end of getMinTCell ------------------------------------
+
+
+/***********************************************************
+	@brief	returns the index of the maximum temperature Cell.
+***********************************************************/
+int CellComms::getMaxTCell(void)
+{
+	return (maxTIndex + 1);
+} // end of getMaxTCell ------------------------------------
 
 
 // Private Functions ---------------------------------------
