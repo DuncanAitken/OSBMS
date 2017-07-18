@@ -14,6 +14,18 @@
 #define ACTIVE_BALANCING  (1)       // enable this to balance the cells all the time, otherwise top balancing only.
 
 
+/******************************************************
+        LCD Display
+  1) On the MEGA it's not pin A4 and A5, it's the two pins closest to the USB jack - check out the diagram here:
+https://arduino-info.wikispaces.com/file/view/Mega2560_R3_Label-small-v2%20%282%29.png/471429496/Mega2560_R3_Label-small-v2%20%282%29.png
+  2) Check the address of the screen using the very useful code here will tell you:
+http://henrysbench.capnfatz.com/henrys-bench/arduino-projects-tips-and-more/arduino-quick-tip-find-your-i2c-address/
+  3) NB you must install the correct library into the arduino/libraries folder on your computer. AND you MUST remove all other LCD libraries from the libraries folder, or it will not work !!!
+    I used version 1.3.4 of:
+https://bitbucket.org/fmalpartida/new-liquidcrystal/downloads/
+******************************************************/
+
+
 #include <CellComms.h>
 #if (0 != LCD_DISPLAY)
 #include <Wire.h>
@@ -55,6 +67,7 @@
 
 
 unsigned int cellMeanMillivolt  = 3600;   // initiate with a high mean value so the loads don't turn on.
+unsigned int sentVoltage        = 3600;
 unsigned long currentMillis;
 unsigned long sendMillis;
 unsigned long readMillis;
@@ -107,7 +120,7 @@ void setup() {
   lcd.setCursor(0, 1);
   lcd.print("     BMS master     ");   // NB must be 20 characters or it garbles
   lcd.setCursor(0, 2);
-  lcd.print("    16 Jul 2017     ");   // NB must be 20 characters or it garbles
+  lcd.print("    18 Jul 2017     ");   // NB must be 20 characters or it garbles
   lcd.setCursor(0, 3);
   lcd.print("Ants, Duncan & Dave ");   // NB must be 20 characters or it garbles
 
@@ -164,10 +177,24 @@ void startCellComms(uint16_t interval) {
     digitalWrite(HEART_LED_PIN, HIGH);   // turn the LED on (HIGH is the voltage level)
     digitalWrite(FAULT_LED_PIN, LOW);
 
+    if (sentVoltage > cellMeanMillivolt) {
+      --sentVoltage;
+    }
+    else if (sentVoltage < cellMeanMillivolt) {
+//      ++sentVoltage;
+      sentVoltage       = cellMeanMillivolt;
+    }
+    if (sentVoltage < 3000) {
+      sentVoltage       = 3000;
+    }
+    else if (sentVoltage > 3600) {
+      sentVoltage       = 3600;
+    }
+
     // write 6 bytes to the BMS to initiate data transfer.
 #if (0 != ACTIVE_BALANCING)
-    cells.sendMillivolts(cellMeanMillivolt);
-//    cells.sendMillivolts(3600);
+    cells.sendMillivolts(sentVoltage);
+//    cells.sendMillivolts(3450);
 #else
     cells.sendMillivolts(0);
 #endif
@@ -273,24 +300,36 @@ void startCellComms(uint16_t interval) {
     lcd.print("Max ");
     lcd.print(cellMaxMillivolt);
     lcd.print(":");
+    if (cellMaxVnum < 10) {
+      lcd.print(" ");
+    }
     lcd.print(cellMaxVnum);
     lcd.print(", ");
     lcd.print(cellMaxTemp / 10);
     lcd.print(".");
     lcd.print(cellMaxTemp % 10);
     lcd.print(":");
+    if (cellMaxTnum < 10) {
+      lcd.print(" ");
+    }
     lcd.print(cellMaxTnum);
     
     lcd.setCursor(0, 2);
     lcd.print("Min ");
     lcd.print(cellMinMillivolt);
     lcd.print(":");
+    if (cellMinVnum < 10) {
+      lcd.print(" ");
+    }
     lcd.print(cellMinVnum);
     lcd.print(", ");
     lcd.print(cellMinTemp / 10);
     lcd.print(".");
     lcd.print(cellMinTemp % 10);
     lcd.print(":");
+    if (cellMinTnum < 10) {
+      lcd.print(" ");
+    }
     lcd.print(cellMinTnum);
     
     lcd.setCursor(0, 3);
