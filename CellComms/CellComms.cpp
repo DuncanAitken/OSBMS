@@ -51,9 +51,8 @@ CellComms::CellComms(void)
   
   for (int i = 0; i < NUM_CELLS; ++i)
   {
-	// TODO: populate the array with some test data
-	_cellDataArray[i].millivolts		= (3250 + i);
-	_cellDataArray[i].temperature		= (210 + i);
+	_cellDataArray[i].millivolts		= 0;
+	_cellDataArray[i].temperature		= 0;
 	_cellDataArray[i].balancing			= 0;
 	_cellDataArray[i].overVoltage		= 0;
 	_cellDataArray[i].underVoltage		= 0;
@@ -71,14 +70,16 @@ void CellComms::sendMillivolts(int millivolts)
 	// mask off the top 3 bits.
 	millivolts					&= 0x1FFF;
 	// set the 2 marker bits to identify this as a seed message.
-	millivolts					!= 0x6000;
+//	millivolts					!= 0x6000;
 	
 	// form into a 4byte buffer and encode
 	_tx_packet[0]				= (millivolts >> 8);
-	_tx_packet[0]				|= 0x60;		// set the marker bits for a master message
+//	_tx_packet[0]				|= 0x60;		// set the marker bits for a master message
+	_tx_packet[0]				|= 0xE0;		// set the marker bits for a master message
 	_tx_packet[1]				= (millivolts);
 	_tx_packet[2]				= (millivolts >> 8);
-	_tx_packet[2]				|= 0x60;		// set the marker bits for a master message
+//	_tx_packet[2]				|= 0x60;		// set the marker bits for a master message
+	_tx_packet[2]				|= 0xE0;		// set the marker bits for a master message
 	_tx_packet[3]				= (millivolts);
 	
 	fecEncode(_tx_packet, 4);
@@ -131,8 +132,8 @@ int CellComms::readCells(void)
 		} // end of if mV makes sense
 	} // end of if valid cell data
 
-	if ((decoded[0] & 0xE0) == 0x60) {
-//	if ((decoded[2] & 0xE0) == 0xE0) {
+//	if ((decoded[0] & 0xE0) == 0x60) {
+	if ((decoded[2] & 0xE0) == 0xE0) {
 		// reset the cell number as this was the seeding message
 		cellNum										= 0;
 	}
