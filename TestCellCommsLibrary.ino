@@ -10,13 +10,14 @@
 // Options
 #define debug             (1)       // enable this to have debug messages sent on serial0
 #define LCD_DISPLAY       (1)       // 0 = No LCD display, 1 = LCD display fitted
+#define DETAILED_INFO     (0)       // 0 = easy to read display, 1 = lots of info on screen
 #define READ_CURRENT      (1)       // enable this to sample a current sensor on an ADC pin. The pin in set in the assignments section
 #define ACTIVE_BALANCING  (1)       // enable this to balance the cells all the time, otherwise top balancing only.
 
 
 /******************************************************
         LCD Display
-  1) On the MEGA it's not pin A4 and A5, it's the two pins closest to the USB jack - check out the diagram here:
+  1) On the MEGA I2C is not pins A4 and A5, it's the two pins closest to the USB jack - check out the diagram here:
 https://arduino-info.wikispaces.com/file/view/Mega2560_R3_Label-small-v2%20%282%29.png/471429496/Mega2560_R3_Label-small-v2%20%282%29.png
   2) Check the address of the screen using the very useful code here will tell you:
 http://henrysbench.capnfatz.com/henrys-bench/arduino-projects-tips-and-more/arduino-quick-tip-find-your-i2c-address/
@@ -55,6 +56,7 @@ https://bitbucket.org/fmalpartida/new-liquidcrystal/downloads/
 
 #if (0 != LCD_DISPLAY)
 #define I2C_ADDR          0x3F      // Define I2C Address where the PCF8574A is
+// These pin assignments are internal to the I2C interface NOT pins on the MEGA.
 #define Rs_pin            0
 #define Rw_pin            1
 #define En_pin            2
@@ -63,27 +65,32 @@ https://bitbucket.org/fmalpartida/new-liquidcrystal/downloads/
 #define D5_pin            5
 #define D6_pin            6
 #define D7_pin            7
-#endif
+#endif // LCD_DISPLAY
 
 
 unsigned int cellMeanMillivolt  = 3600;   // initiate with a high mean value so the loads don't turn on.
 unsigned int sentVoltage        = 3600;
+unsigned int beepTime;
+unsigned int beepGap;
 unsigned long currentMillis;
 unsigned long sendMillis;
 unsigned long readMillis;
 unsigned long readAmpsMillis;
 unsigned long updateSoCMillis;
-unsigned long ScreenRefreshMillis;
+//unsigned long ScreenRefreshMillis;
+byte beeps;                               // the number of times to beep the buzzer
+#if (0 != READ_CURRENT)
 long milliAmps;
 long aveMilliAmps;
 long milliAmpHours;
+#endif  // READ_CURRENT
 unsigned int SoC;                         // State of Charge
 
 CellComms cells;                          // constructor for the CellComms library
 
 #if (0 != LCD_DISPLAY)
 LiquidCrystal_I2C       lcd(I2C_ADDR, En_pin, Rw_pin, Rs_pin, D4_pin, D5_pin, D6_pin, D7_pin);
-#endif
+#endif  // LCD_DISPLAY
 
 void setup() {
   Serial.begin(DEBUG_BAUD);
@@ -101,7 +108,7 @@ void setup() {
   // NEW LCD code using I2C
   lcd.begin (20, 4, LCD_5x8DOTS);
   lcd.setBacklightPin(BACKLIGHT_PIN, POSITIVE); // init the backlight
-#endif
+#endif  // LCD_DISPLAY
   
   digitalWrite(HEART_LED_PIN, HIGH);
   digitalWrite(FAULT_LED_PIN, HIGH);
@@ -116,11 +123,11 @@ void setup() {
   lcd.setBacklight(HIGH);     // Backlight on
   lcd.clear(); // clear display, set cursor position to zero
 
-  lcd.print("   Eco-Ants OSBMS   ");    // NB must be 20 characters or it garbles
+  lcd.print("   Eco-Ants OSBMS   ");   // NB must be 20 characters or it garbles
   lcd.setCursor(0, 1);
   lcd.print("     BMS master     ");   // NB must be 20 characters or it garbles
   lcd.setCursor(0, 2);
-  lcd.print("    18 Jul 2017     ");   // NB must be 20 characters or it garbles
+  lcd.print("    26 Jul 2017     ");   // NB must be 20 characters or it garbles
   lcd.setCursor(0, 3);
   lcd.print("Ants, Duncan & Dave ");   // NB must be 20 characters or it garbles
 
@@ -128,6 +135,9 @@ void setup() {
   delay(2000);
 #endif // LCD_DISPLAY
 
+  beeps               = 0;
+  beepTime            = 0;
+  beepGap             = 0;
   aveMilliAmps        = 0;
   milliAmpHours       = 35000;          // 35Ah
   SoC                 = 5000;           // 50.00%
@@ -135,38 +145,40 @@ void setup() {
   sendMillis          = (currentMillis + 100);
   readAmpsMillis      = (currentMillis + 50);
   updateSoCMillis     = (currentMillis + 1025);
-  ScreenRefreshMillis = (currentMillis + 1033);
+//  ScreenRefreshMillis = (currentMillis + 1033);
 }
 
 void loop() {
+  unsigned long lastMillis      = 0;
+  
   // this is essentially just a scheduler to call functions at different intervals.
   
   currentMillis       = millis();
 
-  if (currentMillis == sendMillis) {
+  if (currentMillis >= sendMillis) {
     startCellComms(CELL_READ_MS);
   } // end of sendMillis
   
-  if (currentMillis == readMillis) {
+  if (currentMillis >= readMillis) {
     readCellComms();
   } // end of readMillis
   
 #if (0 != READ_CURRENT)
-  if (currentMillis == readAmpsMillis) {
+  if (currentMillis >= readAmpsMillis) {
     readAmps();
   } // end of readMillis
 #endif  // READ_CURRENT
 
-  if (currentMillis == updateSoCMillis)
-  {
+  if (currentMillis >= updateSoCMillis) {
     updateSoC();
   }
 
-  if (currentMillis == ScreenRefreshMillis)
-  {
-    // TODO:
+  if (currentMillis != lastMillis) {
+    beeper();
   }
-} // end of loop
+
+  lastMillis          = currentMillis;
+} // end of loop -------------------------------------
 
 
 /******************************************
@@ -177,13 +189,14 @@ void startCellComms(uint16_t interval) {
     digitalWrite(HEART_LED_PIN, HIGH);   // turn the LED on (HIGH is the voltage level)
     digitalWrite(FAULT_LED_PIN, LOW);
 
+    // use a very long time constant for falling voltage so high current draw doesn't cause balancing.
     if (sentVoltage > cellMeanMillivolt) {
       --sentVoltage;
     }
     else if (sentVoltage < cellMeanMillivolt) {
-//      ++sentVoltage;
-      sentVoltage       = cellMeanMillivolt;
+      sentVoltage       = (sentVoltage + cellMeanMillivolt) / 2;
     }
+    // apply limits to the target value we tell the cells
     if (sentVoltage < 3000) {
       sentVoltage       = 3000;
     }
@@ -194,7 +207,6 @@ void startCellComms(uint16_t interval) {
     // write 6 bytes to the BMS to initiate data transfer.
 #if (0 != ACTIVE_BALANCING)
     cells.sendMillivolts(sentVoltage);
-//    cells.sendMillivolts(3450);
 #else
     cells.sendMillivolts(0);
 #endif
@@ -236,9 +248,8 @@ void startCellComms(uint16_t interval) {
   
 #ifdef debug
     Serial.print("mean ");
-    Serial.println(cellMeanMillivolt);
-    
-    Serial.print("min ");
+    Serial.print(cellMeanMillivolt);
+    Serial.print(", min ");
     Serial.print(cellMinMillivolt);
     Serial.print(", max ");
     Serial.print(cellMaxMillivolt);
@@ -259,6 +270,8 @@ void startCellComms(uint16_t interval) {
     // if any cells are under-voltage then turn the charger on
     if (cellsUndervolt > 0) {
       digitalWrite(RELAY_PIN, HIGH);   // turn charger on
+
+      beeps               = 4;
     }
     // enable charger if SoC < 80% ?
     if (cellMaxMillivolt < 3500)
@@ -276,10 +289,14 @@ void startCellComms(uint16_t interval) {
     // if any cells are overvoltage then turn the charger off
     if (cellsOvervolt > 0) {
       digitalWrite(RELAY_PIN, LOW);   // turn charger off
+
+      beeps               = 2;
     }
     // if any cells are over-temperature then turn the charger off
     if (cellsOvertemp > 0) {
       digitalWrite(RELAY_PIN, LOW);   // turn charger off
+
+      beeps               = 3;
     }
 
 
@@ -289,12 +306,24 @@ void startCellComms(uint16_t interval) {
 #if (0 != LCD_DISPLAY)
     lcd.clear(); // clear display, set cursor position to zero
     lcd.print(cellsRead);
+#if (0 == DETAILED_INFO)
+    lcd.print(" of ");
+    lcd.print(NUM_CELLS);
+    lcd.print(" read, ");
+    if ( (cellsRead == NUM_CELLS) && (cellsUndervolt == 0) && (cellsOvervolt == 0) && (cellsOvertemp == 0) ) {
+      lcd.print(":)");
+    }
+    else {
+      lcd.print(":(");
+    }
+#else // DETAILED_INFO
     lcd.print(" read, u");
     lcd.print(cellsUndervolt);
     lcd.print(" o");
     lcd.print(cellsOvervolt);
     lcd.print(" t");
     lcd.print(cellsOvertemp);
+#endif  // DETAILED_INFO
     
     lcd.setCursor(0, 1);
     lcd.print("Max ");
@@ -358,12 +387,48 @@ void startCellComms(uint16_t interval) {
     lcd.setCursor(0, 3);
     lcd.print("Break before # "); lcd.print((NUM_CELLS - cellsRead));
 #endif // LCD_DISPLAY
+
+    beeps               = 1;
   } // not all cells read
 
   readMillis            += CELL_LOOP_MS;  // move the trigger value on so it doesn't run 100 times
+
+  // backstop in case send is in the past
+  if (sendMillis < millis()) {
+    sendMillis          = (readMillis - CELL_READ_MS);
+  }
   
   digitalWrite(HEART_LED_PIN, LOW);   // turn the LED off to show we're done
  } // end of readCellComms ---------------------------
+ 
+
+/*********************************************
+  manages the beeping
+*********************************************/
+void    beeper(void) {
+  // TODO: add loop to beep x times
+  if (beeps > 0) {
+    if ( (beepTime == 0) && (beepGap == 0) ) {
+      digitalWrite(ALARM_LED_PIN, HIGH);
+      beepTime        = 250;
+    }
+    else if (beepTime > 0) {
+      --beepTime;
+      // check if we're at the end of the beep
+      if (beepTime == 0) {
+        digitalWrite(ALARM_LED_PIN, LOW);
+        --beeps;
+        // are there more beeps to do?
+        if (beeps > 0) {
+          beepGap     = 500;
+        } // end of if more beeps to be done
+      } // end of end of beep
+    } // end of else if beeping
+    else if (beepGap > 0) {
+      --beepGap;
+    }
+  } // end of if beeps to do
+} // end of beeper ----------------------------------
 
 
 #if (0 != READ_CURRENT)
