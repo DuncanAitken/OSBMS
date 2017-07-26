@@ -7,7 +7,7 @@
   and uses Serial2 to communicate with the Cell Monitors.
   
   NOTE: You will need to edit
-  C:\Users\<username>\AppData\Local\Arduino15\packages\arduino\hardware\avr\1.6.18\cores\arduino\HardwareSerial.h
+  C:\Users\<username>\AppData\Local\Arduino15\packages\arduino\hardware\avr\<version>\cores\arduino\HardwareSerial.h
   if you need to read more than 9 cells.
   
   User needs to select the appropriate CELL_BAUD value to match
