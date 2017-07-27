@@ -51,6 +51,7 @@ https://bitbucket.org/fmalpartida/new-liquidcrystal/downloads/
 #define ALARM_LED_PIN     (4)
 #define FAULT_LED_PIN     (5)
 #define RELAY_PIN         (6)
+#define HEATER_PIN        (7)
 #define HEART_LED_PIN     (13)
 #define AMPS_AN_PIN       (0)       // the ADC pin connected to the current sensor
 
@@ -70,6 +71,7 @@ https://bitbucket.org/fmalpartida/new-liquidcrystal/downloads/
 
 unsigned int cellMeanMillivolt  = 3600;   // initiate with a high mean value so the loads don't turn on.
 unsigned int sentVoltage        = 3600;
+unsigned int lowestVoltage;
 unsigned int beepTime;
 unsigned int beepGap;
 unsigned long currentMillis;
@@ -103,6 +105,7 @@ void setup() {
   pinMode(FAULT_LED_PIN, OUTPUT);       // Enable Fault LED
   pinMode(ALARM_LED_PIN, OUTPUT);       // Enable Alarm LED
   pinMode(RELAY_PIN, OUTPUT);           // Enable Relay
+  pinMode(HEATER_PIN, OUTPUT);          // Enable Heater
 
 #if (0 != LCD_DISPLAY)
   // NEW LCD code using I2C
@@ -110,6 +113,8 @@ void setup() {
   lcd.setBacklightPin(BACKLIGHT_PIN, POSITIVE); // init the backlight
 #endif  // LCD_DISPLAY
   
+  digitalWrite(RELAY_PIN, LOW);
+  digitalWrite(HEATER_PIN, LOW);
   digitalWrite(HEART_LED_PIN, HIGH);
   digitalWrite(FAULT_LED_PIN, HIGH);
   delay(200); 
@@ -127,7 +132,7 @@ void setup() {
   lcd.setCursor(0, 1);
   lcd.print("     BMS master     ");   // NB must be 20 characters or it garbles
   lcd.setCursor(0, 2);
-  lcd.print("    26 Jul 2017     ");   // NB must be 20 characters or it garbles
+  lcd.print("    27 Jul 2017     ");   // NB must be 20 characters or it garbles
   lcd.setCursor(0, 3);
   lcd.print("Ants, Duncan & Dave ");   // NB must be 20 characters or it garbles
 
@@ -138,9 +143,12 @@ void setup() {
   beeps               = 0;
   beepTime            = 0;
   beepGap             = 0;
+  lowestVoltage       = 3600;
+  SoC                 = (SOC_MAX / 2);  // 50.00%
+#if (0 != READ_CURRENT)
   aveMilliAmps        = 0;
   milliAmpHours       = 35000;          // 35Ah
-  SoC                 = 5000;           // 50.00%
+#endif  // (0 != READ_CURRENT)
   currentMillis       = millis();
   sendMillis          = (currentMillis + 100);
   readAmpsMillis      = (currentMillis + 50);
@@ -237,6 +245,7 @@ void startCellComms(uint16_t interval) {
     int cellMaxMillivolt  = cells.getCellsMaxV();
     int cellMinTemp       = cells.getCellsMinT();
     int cellMaxTemp       = cells.getCellsMaxT();
+    int cellAveTemp       = cells.getCellsAveT();
     int cellsUndervolt    = cells.getCellsUnderVolt();
     int cellsOvervolt     = cells.getCellsOverVolt();
     int cellsOvertemp     = cells.getCellsOverTemp();
@@ -299,22 +308,51 @@ void startCellComms(uint16_t interval) {
       beeps               = 3;
     }
 
+    // Heater control
+    if (cellAveTemp < 150) {
+      digitalWrite(HEATER_PIN, HIGH);
+    }
+    else {
+      digitalWrite(HEATER_PIN, LOW);
+    }
 
-    // TODO: do other stuff because the read was good.
+
+    // DEBUG !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    SoC   = SOC_MAX;
+//    SoC   = (SOC_MAX / 2);
+//    SoC   = (SOC_MAX / 10) - 1;
 
     
 #if (0 != LCD_DISPLAY)
-    lcd.clear(); // clear display, set cursor position to zero
+    lcd.clear(); // clear display, set cursor position to 0,0
+
+    // Line 1
     lcd.print(cellsRead);
 #if (0 == DETAILED_INFO)
-    lcd.print(" of ");
+    lcd.print("/");
     lcd.print(NUM_CELLS);
-    lcd.print(" read, ");
-    if ( (cellsRead == NUM_CELLS) && (cellsUndervolt == 0) && (cellsOvervolt == 0) && (cellsOvertemp == 0) ) {
-      lcd.print(":)");
+    if (cellsUndervolt |= 0) {
+      lcd.setCursor(13, 0);
+      lcd.print(cellsUndervolt);
+      lcd.print(" LOW");
+    }
+    else if (cellsOvertemp |= 0) {
+      lcd.setCursor(13, 0);
+      lcd.print(cellsOvertemp);
+      lcd.print(" HOT");
+    }
+    else if (cellsOvervolt |= 0) {
+      lcd.setCursor(13, 0);
+      lcd.print(cellsOvervolt);
+      lcd.print(" HIGH");
+    }
+    else if (cellsRead != NUM_CELLS) {
+      lcd.setCursor(17, 0);
+      lcd.print(":(");
     }
     else {
-      lcd.print(":(");
+      lcd.setCursor(17, 0);
+      lcd.print(":)");
     }
 #else // DETAILED_INFO
     lcd.print(" read, u");
@@ -325,7 +363,19 @@ void startCellComms(uint16_t interval) {
     lcd.print(cellsOvertemp);
 #endif  // DETAILED_INFO
     
+    // Line 2
     lcd.setCursor(0, 1);
+#if (0 == DETAILED_INFO)
+    lcd.print(cellMinMillivolt);
+    lcd.print(" - ");
+    lcd.print(cellMaxMillivolt);
+    lcd.print("mV");
+    lcd.setCursor(15, 1);
+    lcd.print(cellAveTemp / 10);
+    lcd.print(".");
+    lcd.print(cellAveTemp % 10);
+    lcd.print("c");
+#else // DETAILED_INFO
     lcd.print("Max ");
     lcd.print(cellMaxMillivolt);
     lcd.print(":");
@@ -342,8 +392,31 @@ void startCellComms(uint16_t interval) {
       lcd.print(" ");
     }
     lcd.print(cellMaxTnum);
+#endif  // DETAILED_INFO
     
+    // Line 3
     lcd.setCursor(0, 2);
+#if (0 == DETAILED_INFO)
+#if (0 != READ_CURRENT)
+    lcd.print(aveMilliAmps / 1000);
+    lcd.print(".");
+    lcd.print((abs(aveMilliAmps % 1000) / 100));
+    lcd.print("A  ");
+#endif  // READ_CURRENT
+    int pos = 16;
+    if (SoC < SOC_MAX) {    // <100% 
+      ++pos;
+    }
+    if (SoC < (SOC_MAX / 10)) {
+      ++pos;
+    }
+//    if (SoC < (SOC_MAX / 100)) {
+//      ++pos;
+//    }
+    lcd.setCursor(pos, 2);
+    lcd.print(SoC / 100);   // only show whole percentages
+    lcd.print("%");
+#else // DETAILED_INFO
     lcd.print("Min ");
     lcd.print(cellMinMillivolt);
     lcd.print(":");
@@ -360,8 +433,27 @@ void startCellComms(uint16_t interval) {
       lcd.print(" ");
     }
     lcd.print(cellMinTnum);
+#endif  // DETAILED_INFO
     
+    // Line 4
     lcd.setCursor(0, 3);
+#if (0 == DETAILED_INFO)
+    lcd.print("Chrgr ");
+    if (digitalRead(RELAY_PIN) == 0) {
+      lcd.print("Off");
+    }
+    else {
+      lcd.print("ON");
+    }
+    lcd.setCursor(12, 3);
+    lcd.print("Heat ");
+    if (digitalRead(HEATER_PIN) == 0) {
+      lcd.print("Off");
+    }
+    else {
+      lcd.print("ON");
+    }
+#else // DETAILED_INFO
     if (cellsBalancing != 0) {
       lcd.print(cellsBalancing);
       lcd.print(" cells balancing");
@@ -372,6 +464,7 @@ void startCellComms(uint16_t interval) {
       lcd.print(", Delta ");
       lcd.print(cellMaxMillivolt - cellMinMillivolt);
     }
+#endif  // DETAILED_INFO
 #endif // LCD_DISPLAY
   } // end of all cells read successfully
   else {
@@ -404,9 +497,10 @@ void startCellComms(uint16_t interval) {
 
 /*********************************************
   manages the beeping
+  called every millisecond
 *********************************************/
 void    beeper(void) {
-  // TODO: add loop to beep x times
+  // loop to beep x times
   if (beeps > 0) {
     if ( (beepTime == 0) && (beepGap == 0) ) {
       digitalWrite(ALARM_LED_PIN, HIGH);
@@ -461,6 +555,7 @@ void    beeper(void) {
     static long tmpMAs    = 0;
     long        SoCMinimum;
     
+#if (0 != READ_CURRENT)
     // if ave current is above noise floor, 1% of full scale
     if ( (aveMilliAmps > 1000) || (aveMilliAmps < -1000) )
     {
@@ -513,6 +608,7 @@ void    beeper(void) {
         relaxedTime       = 0;
       }
     } // end of else low current
+#endif  // (0 != READ_CURRENT)
 
     updateSoCMillis       += SOC_UPDATE_MS;
   } // end of updateSoC ------------------------------
