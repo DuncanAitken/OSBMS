@@ -10,10 +10,10 @@
 // Options
 #define debug             (1)       // enable this to have debug messages sent on serial0
 #define LCD_DISPLAY       (1)       // 0 = No LCD display, 1 = LCD display fitted
-#define DETAILED_INFO     (0)       // 0 = easy to read display, 1 = lots of info on screen
-#define READ_CURRENT      (1)       // enable this to sample a current sensor on an ADC pin. The pin in set in the assignments section
-#define ACTIVE_BALANCING  (1)       // enable this to balance the cells all the time, otherwise top balancing only.
-
+#define DETAILED_INFO     (1)       // 0 = easy to read display, 1 = lots of info on screen
+#define READ_CURRENT      (0)       // enable this to sample a current sensor on an ADC pin. The pin in set in the assignments section
+#define ACTIVE_BALANCING  (0)       // enable this to balance the cells all the time, otherwise top balancing only.
+#define DISABLE_BEEPS     (1)
 
 /******************************************************
         LCD Display
@@ -56,7 +56,7 @@ https://bitbucket.org/fmalpartida/new-liquidcrystal/downloads/
 #define AMPS_AN_PIN       (0)       // the ADC pin connected to the current sensor
 
 #if (0 != LCD_DISPLAY)
-#define I2C_ADDR          0x3F      // Define I2C Address where the PCF8574A is
+#define I2C_ADDR          0x27      // Define I2C Address where the PCF8574A is
 // These pin assignments are internal to the I2C interface NOT pins on the MEGA.
 #define Rs_pin            0
 #define Rw_pin            1
@@ -501,16 +501,23 @@ void startCellComms(uint16_t interval) {
 *********************************************/
 void    beeper(void) {
   // loop to beep x times
-  if (beeps > 0) {
+  if (beeps > 0 && beeps < 5) {
+    Serial.print("beeper....");
+    Serial.println(beeps);
+
     if ( (beepTime == 0) && (beepGap == 0) ) {
+#if (0 != DISANABLE_BEEPER)
       digitalWrite(ALARM_LED_PIN, HIGH);
+#endif
       beepTime        = 250;
     }
     else if (beepTime > 0) {
       --beepTime;
       // check if we're at the end of the beep
       if (beepTime == 0) {
+#if (0 != DISANABLE_BEEPER)
         digitalWrite(ALARM_LED_PIN, LOW);
+#endif
         --beeps;
         // are there more beeps to do?
         if (beeps > 0) {
