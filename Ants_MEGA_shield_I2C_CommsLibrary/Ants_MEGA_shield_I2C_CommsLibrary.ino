@@ -40,6 +40,7 @@ LiquidCrystal_I2C       lcd(I2C_ADDR, En_pin, Rw_pin, Rs_pin, D4_pin, D5_pin, D6
 #define HEART_LED_PIN     (13)
 #define AMPS_AN_PIN       (0)
 
+#define NUM_CELLS 6
 
 int lowestCellEverV = 3500;
 unsigned int cellMeanMillivolt  = 3600;   // initiate with a high mean value so the loads don't turn on.
@@ -60,6 +61,8 @@ void setup() {
   Serial.println("Starting...");
   // for debugging, press reset on PCB to see via serial what code is running :)
   Serial.println("FILE =->Ants_MEGA_shield_I2C_Library");
+  Serial.print("Num cells:");
+  Serial.println(NUM_CELLS);
 #endif
 
   // NEW LCD code using I2C
@@ -112,19 +115,19 @@ void loop() {
 
   currentMillis       = millis();
 
-  if (currentMillis == sendMillis) {
+  if (currentMillis >= sendMillis) {
     startCellComms(CELL_READ_MS);
   } // end of sendMillis
 
-  if (currentMillis == readMillis) {
+  if (currentMillis >= readMillis) {
     readCellComms();
   } // end of readMillis
 
-  if (currentMillis == readAmpsMillis) {
+  if (currentMillis >= readAmpsMillis) {
     readAmps();
   } // end of readMillis
 
-  if (currentMillis == updateSoCMillis)
+  if (currentMillis >= updateSoCMillis)
   {
     updateSoC();
   }
@@ -266,6 +269,18 @@ void readCellComms(void) {
     lcd.print(cellsRead); lcd.print(" out of "); lcd.print(NUM_CELLS);
     lcd.setCursor(0, 3);
     lcd.print("Break before # "); lcd.print((NUM_CELLS - cellsRead));
+
+#ifdef debug
+  Serial.print("Not all cells read! Cell mean:");
+  Serial.println(cellMeanMillivolt);
+  Serial.print("Lowest:");
+  Serial.println(lowestCellV);
+  Serial.print("Highest:");
+  Serial.println(lowestCellV);
+  Serial.println("__________");
+  
+  
+#endif
 
   } // end of not all cells read
 
