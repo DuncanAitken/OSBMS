@@ -97,6 +97,10 @@ int CellComms::readCells(void)
   int bytes_available         					= Serial2.available();
   int cellNum                 					= 0;
   int tempMillivolts;
+  struct _cellData _cellDataBuffer[NUM_CELLS];
+  static unsigned char lastOvertemp[NUM_CELLS];
+  static unsigned char lastOvervolt[NUM_CELLS];
+  static unsigned char lastUndervolt[NUM_CELLS];
   
   while (bytes_available >= expected_bytes ) {
     int i                     					= 0;
@@ -119,12 +123,13 @@ int CellComms::readCells(void)
 	tempMillivolts									= ((decoded[0] & 0x1F) << 8) + decoded[1];
 	if ( (tempMillivolts > 1900)				// The regulator colapses at 2v
 			&& (tempMillivolts < 5100) ) {		// the adc will max out at 5v
-		_cellDataArray[cellNum].millivolts			= ((decoded[0] & 0x1F) << 8) + decoded[1];
-		_cellDataArray[cellNum].temperature			= ((decoded[2] & 0x0F) << 8) + decoded[3];
-		_cellDataArray[cellNum].balancing			= ((decoded[0] & 0x80) >> 7);
-		_cellDataArray[cellNum].overTemperature		= ((decoded[2] & 0x80) >> 7);
-		_cellDataArray[cellNum].overVoltage			= ((decoded[2] & 0x40) >> 6);
-		_cellDataArray[cellNum].underVoltage		= ((decoded[2] & 0x20) >> 5);
+		// read the data into a temporary buffer so we can validate it.
+		_cellDataBuffer[cellNum].millivolts			= tempMillivolts;
+		_cellDataBuffer[cellNum].temperature		= ((decoded[2] & 0x0F) << 8) + decoded[3];
+		_cellDataBuffer[cellNum].balancing			= ((decoded[0] & 0x80) >> 7);
+		_cellDataBuffer[cellNum].overTemperature	= ((decoded[2] & 0x80) >> 7);
+		_cellDataBuffer[cellNum].overVoltage		= ((decoded[2] & 0x40) >> 6);
+		_cellDataBuffer[cellNum].underVoltage		= ((decoded[2] & 0x20) >> 5);
 		} // end of if mV makes sense
 	} // end of if valid cell data
 
@@ -138,6 +143,30 @@ int CellComms::readCells(void)
   } // end of while packet available
   
   cellsRead											= cellNum;
+  
+  // copy temp buffer starting at (NUM_CELLS - cellNum)
+  if (cellNum <= NUM_CELLS) {
+	for (int i = 0; i < cellNum; ++i) {
+		_cellDataArray[i + (NUM_CELLS - cellNum)].millivolts		= _cellDataBuffer[i].millivolts;
+		_cellDataArray[i + (NUM_CELLS - cellNum)].temperature		= _cellDataBuffer[i].temperature;
+		_cellDataArray[i + (NUM_CELLS - cellNum)].balancing		= _cellDataBuffer[i].balancing;
+		unsigned char temp											= _cellDataBuffer[i].overTemperature;
+		if (lastOvertemp[i + (NUM_CELLS - cellNum)] == temp) {
+			_cellDataArray[i + (NUM_CELLS - cellNum)].overTemperature	= temp;
+		}
+		lastOvertemp[i + (NUM_CELLS - cellNum)]					= temp;
+		temp														= _cellDataBuffer[i].overVoltage;
+		if (lastOvervolt[i + (NUM_CELLS - cellNum)] == temp) {
+			_cellDataArray[i + (NUM_CELLS - cellNum)].overVoltage	= temp;
+		}
+		lastOvervolt[i + (NUM_CELLS - cellNum)]					= temp;
+		temp														= _cellDataBuffer[i].underVoltage;
+		if (lastUndervolt[i + (NUM_CELLS - cellNum)] == temp) {
+			_cellDataArray[i + (NUM_CELLS - cellNum)].underVoltage	= temp;
+		}
+		lastUndervolt[i + (NUM_CELLS - cellNum)]					= temp;
+	} // end of for each cell read
+  }
   
   // Read remaining bytes...
   bytes_available             						= Serial2.available(); 
