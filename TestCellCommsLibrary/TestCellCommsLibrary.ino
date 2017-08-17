@@ -10,10 +10,11 @@
 // Options
 #define debug             (1)       // enable this to have debug messages sent on serial0
 #define LCD_DISPLAY       (1)       // 0 = No LCD display, 1 = LCD display fitted
-#define DETAILED_INFO     (1)       // 0 = easy to read display, 1 = lots of info on screen
-#define READ_CURRENT      (0)       // enable this to sample a current sensor on an ADC pin. The pin in set in the assignments section
-#define ACTIVE_BALANCING  (0)       // enable this to balance the cells all the time, otherwise top balancing only.
-#define DISABLE_BEEPS     (1)
+#define DETAILED_INFO     (0)       // 0 = easy to read display, 1 = lots of info on screen
+#define READ_CURRENT      (1)       // enable this to sample a current sensor on an ADC pin. The pin in set in the assignments section
+#define ACTIVE_BALANCING  (1)       // enable this to balance the cells all the time, otherwise top balancing only.
+#define SOC_ESTIMATOR     (1)       // 1 = estimate State-of-Charge, 0 = disable.
+
 
 /******************************************************
         LCD Display
@@ -33,19 +34,25 @@ https://bitbucket.org/fmalpartida/new-liquidcrystal/downloads/
 #include <LCD.h>
 #include <LiquidCrystal_I2C.h>
 #endif
+#if (0 != SOC_ESTIMATOR)
+#include <BatteryLookup.h>
+#endif  // SOC_ESTIMATOR
 
 
 
 // Settings
+#define BATT_MAH          (35000)   // 35Ah or 35,000mAh. yours may be larger!
 #define DEBUG_BAUD        (9600)    // baudrate for debug comms to the console
-#define CELL_LOOP_MS      (6000)    // interval between cell data reads
-#define CELL_READ_MS      (400)     // delay after send for the data to shift in
+#define CELL_LOOP_MS      (9000)    // interval between cell data reads
+#define CELL_READ_MS      (600)     // delay after send for the data to shift in
 #define AMPS_READ_LOOP_MS (100)     // interval in ms between reading the current sensor.
 #define SOC_UPDATE_MS     (1000)    // interval in ms between updating the State-of-Charge (SoC).
 #define SCREEN_REFRESH_MS (1000)    // how often the display is updated
 #define AMPS_OFFSET       (512)     // ~1/2 of the max ADC count as the current sensor is biased so it can read charge and dis-charge currents.
 #define AMPS_SCALAR       (97)      // scalar to convert the ADC count into the actual milliamps.
-#define SOC_MAX           (10000)   // 100.00, 100% with 2 d.p.
+#if (0 != SOC_ESTIMATOR)
+#define SOC_MAX           (SOC_100PCT)   // 100.00, 100% with 2 d.p.
+#endif  // SOC_ESTIMATOR
 
 // Pin Assignments
 #define ALARM_LED_PIN     (4)
@@ -56,7 +63,7 @@ https://bitbucket.org/fmalpartida/new-liquidcrystal/downloads/
 #define AMPS_AN_PIN       (0)       // the ADC pin connected to the current sensor
 
 #if (0 != LCD_DISPLAY)
-#define I2C_ADDR          0x27      // Define I2C Address where the PCF8574A is
+#define I2C_ADDR          0x3F      // Define I2C Address where the PCF8574A is
 // These pin assignments are internal to the I2C interface NOT pins on the MEGA.
 #define Rs_pin            0
 #define Rw_pin            1
@@ -79,16 +86,20 @@ unsigned long sendMillis;
 unsigned long readMillis;
 unsigned long readAmpsMillis;
 unsigned long updateSoCMillis;
-//unsigned long ScreenRefreshMillis;
+unsigned long ScreenRefreshMillis;
 byte beeps;                               // the number of times to beep the buzzer
 #if (0 != READ_CURRENT)
 long milliAmps;
 long aveMilliAmps;
 long milliAmpHours;
 #endif  // READ_CURRENT
+#if (0 != SOC_ESTIMATOR)
 unsigned int SoC;                         // State of Charge
+int socArray[3];
+#endif  // (0 != SOC_ESTIMATOR)
 
 CellComms cells;                          // constructor for the CellComms library
+BatteryLookup socs;
 
 #if (0 != LCD_DISPLAY)
 LiquidCrystal_I2C       lcd(I2C_ADDR, En_pin, Rw_pin, Rs_pin, D4_pin, D5_pin, D6_pin, D7_pin);
@@ -132,7 +143,7 @@ void setup() {
   lcd.setCursor(0, 1);
   lcd.print("     BMS master     ");   // NB must be 20 characters or it garbles
   lcd.setCursor(0, 2);
-  lcd.print("    27 Jul 2017     ");   // NB must be 20 characters or it garbles
+  lcd.print("    17 Aug 2017     ");   // NB must be 20 characters or it garbles
   lcd.setCursor(0, 3);
   lcd.print("Ants, Duncan & Dave ");   // NB must be 20 characters or it garbles
 
@@ -144,10 +155,10 @@ void setup() {
   beepTime            = 0;
   beepGap             = 0;
   lowestVoltage       = 3600;
-  SoC                 = (SOC_MAX / 2);  // 50.00%
+  SoC                 = (SOC_MAX / 2);  // 100%
 #if (0 != READ_CURRENT)
   aveMilliAmps        = 0;
-  milliAmpHours       = 35000;          // 35Ah
+  milliAmpHours       = BATT_MAH;       // Initialise to a full Battery
 #endif  // (0 != READ_CURRENT)
   currentMillis       = millis();
   sendMillis          = (currentMillis + 100);
@@ -179,6 +190,8 @@ void loop() {
 
   if (currentMillis >= updateSoCMillis) {
     updateSoC();
+
+    updateSoCMillis       += SOC_UPDATE_MS;
   }
 
   if (currentMillis != lastMillis) {
@@ -316,12 +329,9 @@ void startCellComms(uint16_t interval) {
       digitalWrite(HEATER_PIN, LOW);
     }
 
-
-    // DEBUG !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-    SoC   = SOC_MAX;
-//    SoC   = (SOC_MAX / 2);
-//    SoC   = (SOC_MAX / 10) - 1;
-
+    if (lowestVoltage < cellMinMillivolt) {
+      lowestVoltage       = cellMinMillivolt;
+    }
     
 #if (0 != LCD_DISPLAY)
     lcd.clear(); // clear display, set cursor position to 0,0
@@ -410,9 +420,6 @@ void startCellComms(uint16_t interval) {
     if (SoC < (SOC_MAX / 10)) {
       ++pos;
     }
-//    if (SoC < (SOC_MAX / 100)) {
-//      ++pos;
-//    }
     lcd.setCursor(pos, 2);
     lcd.print(SoC / 100);   // only show whole percentages
     lcd.print("%");
@@ -501,27 +508,20 @@ void startCellComms(uint16_t interval) {
 *********************************************/
 void    beeper(void) {
   // loop to beep x times
-  if (beeps > 0 && beeps < 5) {
-    Serial.print("beeper....");
-    Serial.println(beeps);
-
+  if (beeps > 0) {
     if ( (beepTime == 0) && (beepGap == 0) ) {
-#if (0 != DISANABLE_BEEPER)
       digitalWrite(ALARM_LED_PIN, HIGH);
-#endif
       beepTime        = 250;
     }
     else if (beepTime > 0) {
       --beepTime;
       // check if we're at the end of the beep
       if (beepTime == 0) {
-#if (0 != DISANABLE_BEEPER)
         digitalWrite(ALARM_LED_PIN, LOW);
-#endif
         --beeps;
         // are there more beeps to do?
         if (beeps > 0) {
-          beepGap     = 500;
+          beepGap     = 10000;
         } // end of if more beeps to be done
       } // end of end of beep
     } // end of else if beeping
@@ -552,9 +552,10 @@ void    beeper(void) {
 #endif  // READ_CURRENT
 
 
+#if (0 != SOC_ESTIMATOR)
  /****************************************************
   * updates the State of Charge estimate
-  * called every 1000ms
+  * called every second.
   ***************************************************/
   void  updateSoC(void)
   {
@@ -564,61 +565,88 @@ void    beeper(void) {
     
 #if (0 != READ_CURRENT)
     // if ave current is above noise floor, 1% of full scale
-    if ( (aveMilliAmps > 1000) || (aveMilliAmps < -1000) )
-    {
-      // count coulombs or rather totalise the mA seconds
-      if (aveMilliAmps > 0)
-      {
-        // assume 5% loss during charging
-        tmpMAs            += (aveMilliAmps - (aveMilliAmps / 20));
-      }
-      else
-      {
-        tmpMAs            += (aveMilliAmps);
-      }
-
-      // establish the threshold for a change in the SoC
-      SoCMinimum          = (milliAmpHours / SOC_MAX);
-
-      // if we have more than 0.01% SoC
-      while (tmpMAs > SoCMinimum)
-      {
-        tmpMAs            -= SoCMinimum;
-        if (SoC < SOC_MAX)
-        {
-          ++SoC;
-        } // end of if SoC < 100%
-      }
-      // if we have more than -0.01% SoC
-      while (tmpMAs < (0 - SoCMinimum))
-      {
-        tmpMAs            += SoCMinimum;
-        if (SoC > 0)
-        {
-          --SoC;
-        } // end of if SoC > 0
-      }
-
-      relaxedTime         = 0;
-    } // end of if enough current to use
-    else  if ( (aveMilliAmps < 100) && (aveMilliAmps > -100) )
+//    if ( (aveMilliAmps > 1000) || (aveMilliAmps < -1000) )
+//    {
+//      // count coulombs or rather totalise the mA seconds
+//      if (aveMilliAmps > 0)
+//      {
+//        // assume 5% loss during charging
+//        tmpMAs            += (aveMilliAmps - (aveMilliAmps / 20));
+//      }
+//      else
+//      {
+//        tmpMAs            += (aveMilliAmps);
+//      }
+//
+//      // establish the threshold for a change in the SoC
+//      SoCMinimum          = (milliAmpHours / SOC_MAX);
+//
+//      // if we have more than 0.01% SoC
+//      while (tmpMAs > SoCMinimum)
+//      {
+//        tmpMAs            -= SoCMinimum;
+//        if (SoC < SOC_MAX)
+//        {
+//          ++SoC;
+//        } // end of if SoC < 100%
+//      }
+//      // if we have more than -0.01% SoC
+//      while (tmpMAs < (0 - SoCMinimum))
+//      {
+//        tmpMAs            += SoCMinimum;
+//        if (SoC > 0)
+//        {
+//          --SoC;
+//        } // end of if SoC > 0
+//      }
+//
+//      relaxedTime         = 0;
+//    } // end of if enough current to use
+//    else  if ( (aveMilliAmps < 100) && (aveMilliAmps > -100) )
     {
       ++relaxedTime;
-      if (relaxedTime > (60 * 5))   // 5 minutes
+//      if (relaxedTime > (60 * 5))   // 5 minutes
+      if (relaxedTime > (30))   // DEBUG !!!!!!!!!!!!!!!!!!!!!!!!!!!
       {
         // read Voc
         
         // TODO: need to add a compensation for temperature
   
         // TODO: need an external library to convert open-circuit voltage (compensated for current and temperature into SoC
+//        socs.getSoC(cellMeanMillivolt, socArray);
+        socs.getSoC(3307, socArray);    // DEBUG !!!!!!!!!!!!!!!!!!!!!!!!!!!
+//        socArray[1]   = 9000;
+//        socArray[2]   = 6000;
+
+        if (SoC > socArray[1]) {
+          SoC             = socArray[1];
+
+          beeps   = 4;    // DEBUG !!!!!!!!!!!!!!!!!!!!!!!!!!
+        }
+        else if (SoC < socArray[2]) {
+          SoC             = socArray[2];
+
+          beeps   = 3;    // DEBUG !!!!!!!!!!!!!!!!!!!!!!!!!!
+        }
+        else if (SoC < socArray[0]) {
+//          ++SoC;
+          SoC   += 100;
+
+          beeps   = 2;    // DEBUG !!!!!!!!!!!!!!!!!!!!!!!!!!
+        }
+        else if (SoC > socArray[0]) {
+//          --SoC;
+          SoC   -= 100;
+
+          beeps   = 1;    // DEBUG !!!!!!!!!!!!!!!!!!!!!!!!!!
+        }
 
         relaxedTime       = 0;
       }
     } // end of else low current
 #endif  // (0 != READ_CURRENT)
-
-    updateSoCMillis       += SOC_UPDATE_MS;
   } // end of updateSoC ------------------------------
+#endif  // (0 != SOC_ESTIMATOR)
 
 
 /*****************************************************
