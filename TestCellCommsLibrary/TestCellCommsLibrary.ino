@@ -14,6 +14,7 @@
 #define READ_CURRENT      (1)       // enable this to sample a current sensor on an ADC pin. The pin in set in the assignments section
 #define ACTIVE_BALANCING  (1)       // enable this to balance the cells all the time, otherwise top balancing only.
 #define SOC_ESTIMATOR     (1)       // 1 = estimate State-of-Charge, 0 = disable.
+#define SHOW_BARGRAPH     (1)       // shows a bargraph of the SoC on the bottom row of the display.
 
 
 /******************************************************
@@ -118,6 +119,9 @@ void setup() {
   pinMode(RELAY_PIN, OUTPUT);           // Enable Relay
   pinMode(HEATER_PIN, OUTPUT);          // Enable Heater
 
+  // set serial 1 for the json streaming
+  Serial1.begin(115200);
+
 #if (0 != LCD_DISPLAY)
   // NEW LCD code using I2C
   lcd.begin (20, 4, LCD_5x8DOTS);
@@ -143,7 +147,7 @@ void setup() {
   lcd.setCursor(0, 1);
   lcd.print("     BMS master     ");   // NB must be 20 characters or it garbles
   lcd.setCursor(0, 2);
-  lcd.print("    17 Aug 2017     ");   // NB must be 20 characters or it garbles
+  lcd.print("    21 Aug 2017     ");   // NB must be 20 characters or it garbles
   lcd.setCursor(0, 3);
   lcd.print("Ants, Duncan & Dave ");   // NB must be 20 characters or it garbles
 
@@ -155,7 +159,7 @@ void setup() {
   beepTime            = 0;
   beepGap             = 0;
   lowestVoltage       = 3600;
-  SoC                 = (SOC_MAX / 2);  // 100%
+  SoC                 = (SOC_MAX / 2);  // 50%
 #if (0 != READ_CURRENT)
   aveMilliAmps        = 0;
   milliAmpHours       = BATT_MAH;       // Initialise to a full Battery
@@ -185,6 +189,8 @@ void loop() {
 #if (0 != READ_CURRENT)
   if (currentMillis >= readAmpsMillis) {
     readAmps();
+
+    readAmpsMillis        += AMPS_READ_LOOP_MS;
   } // end of readMillis
 #endif  // READ_CURRENT
 
@@ -247,7 +253,7 @@ void startCellComms(uint16_t interval) {
   int cellsRead         = cells.readCells();
   
 #ifdef debug
-  Serial.print("Read ");
+  Serial.print("\rRead ");
   Serial.println(cellsRead);
 #endif
     
@@ -286,6 +292,11 @@ void startCellComms(uint16_t interval) {
     Serial.print(cellsOvertemp);
     Serial.print(", Load ");
     Serial.println(cellsBalancing);
+    
+    Serial.print(SoC / 100);
+    Serial.print(".");
+    Serial.print(SoC % 100);
+    Serial.println("%");
 #endif
 
     // Check conditions to turn the charger ON
@@ -332,8 +343,212 @@ void startCellComms(uint16_t interval) {
     if (lowestVoltage < cellMinMillivolt) {
       lowestVoltage       = cellMinMillivolt;
     }
-    
+
+
+    // Prepare a JSON payload string
+    String payload = "{\"battery\": {\r";   // 14 chars
+    payload += "\t\"num cells\":";          // 13 chars - 27 total
+    payload += NUM_CELLS;                   // 2 chars - 29 total
+    payload += ",\r";                       // 2 char - 31 total
+    payload += "\t\"voltage\":";            // 11 chars - 42 total
+    payload += (cellMeanMillivolt * NUM_CELLS); 
+    payload += ",\r";                       // 2 chars
+    payload += "\t\"current\":";            // 11 chars
+    payload += aveMilliAmps;
+    payload += ",\r";                       // 2 chars
+    payload += "\t\"temperature\":";        // 15 chars
+    payload += cellAveTemp; 
+    payload += ",\r";                       // 2 chars
+    payload += "\t\"SoC\":";                // 7 chars
+    payload += SoC;
+    // TODO:
+    payload += "\r}}";                      // 3 chars
+
+    // Send payload
+    char attributes[200];
+    payload.toCharArray( attributes, 200 );
+//    client.publish( "v1/devices/me/telemetry", attributes );
+    Serial1.println( attributes );
+
+  
+  } // end of all cells read successfully
+  else {
+    digitalWrite(FAULT_LED_PIN, HIGH);
+
+    beeps               = 1;
+  } // not all cells read
+
 #if (0 != LCD_DISPLAY)
+  showLCD(cellsRead);
+#endif // LCD_DISPLAY
+
+  readMillis            += CELL_LOOP_MS;  // move the trigger value on so it doesn't run 100 times
+
+  // backstop in case send is in the past
+  if (sendMillis < millis()) {
+    sendMillis          = (readMillis - CELL_READ_MS);
+  }
+  
+  digitalWrite(HEART_LED_PIN, LOW);   // turn the LED off to show we're done
+ } // end of readCellComms ---------------------------
+ 
+
+/*********************************************
+  manages the beeping
+  called every millisecond
+*********************************************/
+void    beeper(void) {
+  // loop to beep x times
+  if (beeps > 0) {
+    if ( (beepTime == 0) && (beepGap == 0) ) {
+      digitalWrite(ALARM_LED_PIN, HIGH);
+      beepTime        = 500;
+    }
+    else if (beepTime > 0) {
+      --beepTime;
+      // check if we're at the end of the beep
+      if (beepTime == 0) {
+        digitalWrite(ALARM_LED_PIN, LOW);
+        --beeps;
+        // are there more beeps to do?
+        if (beeps > 0) {
+          beepGap     = 15000;
+        } // end of if more beeps to be done
+      } // end of end of beep
+    } // end of else if beeping
+    else if (beepGap > 0) {
+      --beepGap;
+    }
+  } // end of if beeps to do
+} // end of beeper ----------------------------------
+
+
+#if (0 != READ_CURRENT)
+/*****************************************************
+ * reads the current sensor
+ ****************************************************/
+ void   readAmps(void)
+ {
+  // sample the adc channel connected to the current sensor
+  int val               = analogRead(AMPS_AN_PIN);
+  
+  // scale the adc reading into milliamps
+  milliAmps             = ( (long) val - AMPS_OFFSET) * AMPS_SCALAR;
+
+  // update a filtered average current as well
+  aveMilliAmps          = ((aveMilliAmps * 9) + milliAmps) / 10;
+ } // end of readAmps --------------------------------
+#endif  // READ_CURRENT
+
+
+#if (0 != SOC_ESTIMATOR)
+ /****************************************************
+  * updates the State of Charge estimate
+  * called every second.
+  ***************************************************/
+  void  updateSoC(void)
+  {
+    static unsigned int relaxedTime    = 0;
+    static long tmpMAs    = 0;
+    long        SoCMinimum;
+    
+#if (0 != READ_CURRENT)
+    // if ave current is above noise floor, 1% of full scale
+//    if ( (aveMilliAmps > 1000) || (aveMilliAmps < -1000) )
+//    {
+//      // count coulombs or rather totalise the mA seconds
+//      if (aveMilliAmps > 0)
+//      {
+//        // assume 5% loss during charging
+//        tmpMAs            += (aveMilliAmps - (aveMilliAmps / 20));
+//      }
+//      else
+//      {
+//        tmpMAs            += (aveMilliAmps);
+//      }
+//
+//      // establish the threshold for a change in the SoC
+//      SoCMinimum          = (milliAmpHours / SOC_MAX);
+//
+//      // if we have more than 0.01% SoC
+//      while (tmpMAs > SoCMinimum)
+//      {
+//        tmpMAs            -= SoCMinimum;
+//        if (SoC < SOC_MAX)
+//        {
+//          ++SoC;
+//        } // end of if SoC < 100%
+//      }
+//      // if we have more than -0.01% SoC
+//      while (tmpMAs < (0 - SoCMinimum))
+//      {
+//        tmpMAs            += SoCMinimum;
+//        if (SoC > 0)
+//        {
+//          --SoC;
+//        } // end of if SoC > 0
+//      }
+//
+//      relaxedTime         = 0;
+//    } // end of if enough current to use
+//    else  if ( (aveMilliAmps < 100) && (aveMilliAmps > -100) )
+    {
+      ++relaxedTime;
+      if (relaxedTime > (60 * 5))   // 5 minutes
+      {
+        // read Voc
+        
+        // TODO: need to add a compensation for temperature
+  
+        // TODO: need an external library to convert open-circuit voltage (compensated for current and temperature into SoC
+        socs.getSoC(cellMeanMillivolt, socArray);
+
+        if (SoC > socArray[1]) {
+          SoC             = socArray[1];
+        }
+        else if (SoC < socArray[2]) {
+          SoC             = socArray[2];
+        }
+        else if (SoC < socArray[0]) {
+          if (SoC < SOC_MAX) {
+            ++SoC;
+          }
+        }
+        else if (SoC > socArray[0]) {
+          if (SoC > 0) {
+            --SoC;
+          }
+        }
+
+        relaxedTime       = 0;
+      }
+    } // end of else low current
+#endif  // (0 != READ_CURRENT)
+  } // end of updateSoC ------------------------------
+#endif  // (0 != SOC_ESTIMATOR)
+
+
+#if (0 != LCD_DISPLAY)
+/*****************************************************
+ * displays the cell data on 20x4 display.
+******************************************************/
+ void showLCD(int cellsRead) {
+  if (cellsRead > 0) {
+    cellMeanMillivolt     = cells.getCellsAveV();
+    int cellMinMillivolt  = cells.getCellsMinV();
+    int cellMaxMillivolt  = cells.getCellsMaxV();
+    int cellMinTemp       = cells.getCellsMinT();
+    int cellMaxTemp       = cells.getCellsMaxT();
+    int cellAveTemp       = cells.getCellsAveT();
+    int cellsUndervolt    = cells.getCellsUnderVolt();
+    int cellsOvervolt     = cells.getCellsOverVolt();
+    int cellsOvertemp     = cells.getCellsOverTemp();
+    int cellsBalancing    = cells.getCellsBalancing();
+    int cellMinVnum       = cells.getMinVCell();
+    int cellMaxVnum       = cells.getMaxVCell();
+    int cellMinTnum       = cells.getMinTCell();
+    int cellMaxTnum       = cells.getMaxTCell();
+    
     lcd.clear(); // clear display, set cursor position to 0,0
 
     // Line 1
@@ -444,6 +659,21 @@ void startCellComms(uint16_t interval) {
     
     // Line 4
     lcd.setCursor(0, 3);
+#if (0 != SHOW_BARGRAPH)
+    int bar   = (SOC_MAX / 20);
+    while (bar < SOC_MAX) {
+      if (bar <= SoC) {
+        lcd.print("B");
+      }
+      else {
+        lcd.print(" ");
+      }
+      bar     += (SOC_MAX / 20);
+    } // end of while bar < 100%
+//    lcd.print(SoC / 100);
+//    lcd.print(".");
+//    lcd.print(SoC % 100);
+#else // NO BARGRAPH
 #if (0 == DETAILED_INFO)
     lcd.print("Chrgr ");
     if (digitalRead(RELAY_PIN) == 0) {
@@ -472,12 +702,9 @@ void startCellComms(uint16_t interval) {
       lcd.print(cellMaxMillivolt - cellMinMillivolt);
     }
 #endif  // DETAILED_INFO
-#endif // LCD_DISPLAY
+#endif  // NO BARGRAPH
   } // end of all cells read successfully
   else {
-    digitalWrite(FAULT_LED_PIN, HIGH);
-
-#if (0 != LCD_DISPLAY)
     lcd.clear();
     lcd.print("My arms are flailing");
     lcd.setCursor(0, 1);
@@ -486,167 +713,9 @@ void startCellComms(uint16_t interval) {
     lcd.print(cellsRead); lcd.print(" out of "); lcd.print(NUM_CELLS);
     lcd.setCursor(0, 3);
     lcd.print("Break before # "); lcd.print((NUM_CELLS - cellsRead));
-#endif // LCD_DISPLAY
-
-    beeps               = 1;
   } // not all cells read
-
-  readMillis            += CELL_LOOP_MS;  // move the trigger value on so it doesn't run 100 times
-
-  // backstop in case send is in the past
-  if (sendMillis < millis()) {
-    sendMillis          = (readMillis - CELL_READ_MS);
-  }
-  
-  digitalWrite(HEART_LED_PIN, LOW);   // turn the LED off to show we're done
- } // end of readCellComms ---------------------------
- 
-
-/*********************************************
-  manages the beeping
-  called every millisecond
-*********************************************/
-void    beeper(void) {
-  // loop to beep x times
-  if (beeps > 0) {
-    if ( (beepTime == 0) && (beepGap == 0) ) {
-      digitalWrite(ALARM_LED_PIN, HIGH);
-      beepTime        = 250;
-    }
-    else if (beepTime > 0) {
-      --beepTime;
-      // check if we're at the end of the beep
-      if (beepTime == 0) {
-        digitalWrite(ALARM_LED_PIN, LOW);
-        --beeps;
-        // are there more beeps to do?
-        if (beeps > 0) {
-          beepGap     = 10000;
-        } // end of if more beeps to be done
-      } // end of end of beep
-    } // end of else if beeping
-    else if (beepGap > 0) {
-      --beepGap;
-    }
-  } // end of if beeps to do
-} // end of beeper ----------------------------------
-
-
-#if (0 != READ_CURRENT)
-/*****************************************************
- * reads the current sensor
- ****************************************************/
- void   readAmps(void)
- {
-  // sample the adc channel connected to the current sensor
-  int val               = analogRead(AMPS_AN_PIN);
-  
-  // scale the adc reading into milliamps
-  milliAmps             = ( (long) val - AMPS_OFFSET) * AMPS_SCALAR;
-
-  // update a filtered average current as well
-  aveMilliAmps          = ((aveMilliAmps * 9) + milliAmps) / 10;
-
-  readAmpsMillis        += AMPS_READ_LOOP_MS;
- } // end of readAmps --------------------------------
-#endif  // READ_CURRENT
-
-
-#if (0 != SOC_ESTIMATOR)
- /****************************************************
-  * updates the State of Charge estimate
-  * called every second.
-  ***************************************************/
-  void  updateSoC(void)
-  {
-    static unsigned int relaxedTime    = 0;
-    static long tmpMAs    = 0;
-    long        SoCMinimum;
-    
-#if (0 != READ_CURRENT)
-    // if ave current is above noise floor, 1% of full scale
-//    if ( (aveMilliAmps > 1000) || (aveMilliAmps < -1000) )
-//    {
-//      // count coulombs or rather totalise the mA seconds
-//      if (aveMilliAmps > 0)
-//      {
-//        // assume 5% loss during charging
-//        tmpMAs            += (aveMilliAmps - (aveMilliAmps / 20));
-//      }
-//      else
-//      {
-//        tmpMAs            += (aveMilliAmps);
-//      }
-//
-//      // establish the threshold for a change in the SoC
-//      SoCMinimum          = (milliAmpHours / SOC_MAX);
-//
-//      // if we have more than 0.01% SoC
-//      while (tmpMAs > SoCMinimum)
-//      {
-//        tmpMAs            -= SoCMinimum;
-//        if (SoC < SOC_MAX)
-//        {
-//          ++SoC;
-//        } // end of if SoC < 100%
-//      }
-//      // if we have more than -0.01% SoC
-//      while (tmpMAs < (0 - SoCMinimum))
-//      {
-//        tmpMAs            += SoCMinimum;
-//        if (SoC > 0)
-//        {
-//          --SoC;
-//        } // end of if SoC > 0
-//      }
-//
-//      relaxedTime         = 0;
-//    } // end of if enough current to use
-//    else  if ( (aveMilliAmps < 100) && (aveMilliAmps > -100) )
-    {
-      ++relaxedTime;
-//      if (relaxedTime > (60 * 5))   // 5 minutes
-      if (relaxedTime > (30))   // DEBUG !!!!!!!!!!!!!!!!!!!!!!!!!!!
-      {
-        // read Voc
-        
-        // TODO: need to add a compensation for temperature
-  
-        // TODO: need an external library to convert open-circuit voltage (compensated for current and temperature into SoC
-//        socs.getSoC(cellMeanMillivolt, socArray);
-        socs.getSoC(3307, socArray);    // DEBUG !!!!!!!!!!!!!!!!!!!!!!!!!!!
-//        socArray[1]   = 9000;
-//        socArray[2]   = 6000;
-
-        if (SoC > socArray[1]) {
-          SoC             = socArray[1];
-
-          beeps   = 4;    // DEBUG !!!!!!!!!!!!!!!!!!!!!!!!!!
-        }
-        else if (SoC < socArray[2]) {
-          SoC             = socArray[2];
-
-          beeps   = 3;    // DEBUG !!!!!!!!!!!!!!!!!!!!!!!!!!
-        }
-        else if (SoC < socArray[0]) {
-//          ++SoC;
-          SoC   += 100;
-
-          beeps   = 2;    // DEBUG !!!!!!!!!!!!!!!!!!!!!!!!!!
-        }
-        else if (SoC > socArray[0]) {
-//          --SoC;
-          SoC   -= 100;
-
-          beeps   = 1;    // DEBUG !!!!!!!!!!!!!!!!!!!!!!!!!!
-        }
-
-        relaxedTime       = 0;
-      }
-    } // end of else low current
-#endif  // (0 != READ_CURRENT)
-  } // end of updateSoC ------------------------------
-#endif  // (0 != SOC_ESTIMATOR)
+ } // end of showLCD -------------------------------
+#endif // LCD_DISPLAY
 
 
 /*****************************************************
