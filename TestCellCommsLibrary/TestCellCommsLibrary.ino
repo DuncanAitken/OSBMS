@@ -56,10 +56,12 @@ https://bitbucket.org/fmalpartida/new-liquidcrystal/downloads/
 #endif  // SOC_ESTIMATOR
 
 // Pin Assignments
-#define ALARM_LED_PIN     (4)
-#define FAULT_LED_PIN     (5)
-#define RELAY_PIN         (6)
+#define ALARM_LED_PIN     (4)       // the buzzer on the shield board
+#define FAULT_LED_PIN     (5)       // the yellow LED on the shield board
+#define RELAY_PIN         (6)       // the relay on the shield board
+#define CHARGER_PIN       (RELAY_PIN)
 #define HEATER_PIN        (7)
+#define DISCONNECT_PIN    (8)
 #define HEART_LED_PIN     (13)
 #define AMPS_AN_PIN       (0)       // the ADC pin connected to the current sensor
 
@@ -80,6 +82,9 @@ https://bitbucket.org/fmalpartida/new-liquidcrystal/downloads/
 unsigned int cellMeanMillivolt  = 3600;   // initiate with a high mean value so the loads don't turn on.
 unsigned int sentVoltage        = 3600;
 unsigned int lowestVoltage;
+unsigned int lowestCell;
+unsigned int hottestTemp;
+unsigned int hottestCell;
 unsigned int beepTime;
 unsigned int beepGap;
 unsigned long currentMillis;
@@ -116,8 +121,10 @@ void setup() {
   pinMode(HEART_LED_PIN, OUTPUT);       // Enable Heart LED
   pinMode(FAULT_LED_PIN, OUTPUT);       // Enable Fault LED
   pinMode(ALARM_LED_PIN, OUTPUT);       // Enable Alarm LED
-  pinMode(RELAY_PIN, OUTPUT);           // Enable Relay
+//  pinMode(RELAY_PIN, OUTPUT);           // Enable Relay
+  pinMode(CHARGER_PIN, OUTPUT);         // Enable Relay
   pinMode(HEATER_PIN, OUTPUT);          // Enable Heater
+  pinMode(DISCONNECT_PIN, OUTPUT);      // Enable Relay
 
   // set serial 1 for the json streaming
   Serial1.begin(115200);
@@ -129,7 +136,9 @@ void setup() {
 #endif  // LCD_DISPLAY
   
   digitalWrite(RELAY_PIN, LOW);
+  digitalWrite(CHARGER_PIN, LOW);
   digitalWrite(HEATER_PIN, LOW);
+  digitalWrite(DISCONNECT_PIN, LOW);
   digitalWrite(HEART_LED_PIN, HIGH);
   digitalWrite(FAULT_LED_PIN, HIGH);
   delay(200); 
@@ -147,7 +156,7 @@ void setup() {
   lcd.setCursor(0, 1);
   lcd.print("     BMS master     ");   // NB must be 20 characters or it garbles
   lcd.setCursor(0, 2);
-  lcd.print("    21 Aug 2017     ");   // NB must be 20 characters or it garbles
+  lcd.print("    28 Aug 2017     ");   // NB must be 20 characters or it garbles
   lcd.setCursor(0, 3);
   lcd.print("Ants, Duncan & Dave ");   // NB must be 20 characters or it garbles
 
@@ -159,6 +168,7 @@ void setup() {
   beepTime            = 0;
   beepGap             = 0;
   lowestVoltage       = 3600;
+  hottestTemp         = 1;              // 0.1c
   SoC                 = (SOC_MAX / 2);  // 50%
 #if (0 != READ_CURRENT)
   aveMilliAmps        = 0;
@@ -240,7 +250,7 @@ void startCellComms(uint16_t interval) {
 
     // wait for the cell data to arrive
     readMillis        = (sendMillis + interval);
-    sendMillis        += CELL_LOOP_MS;    // TODO: make the interval a function of the battery current
+    sendMillis        += CELL_LOOP_MS;    // TODO: could make the interval a function of the battery current
  } // end of startCellComms --------------------------
 
 
@@ -295,6 +305,9 @@ void startCellComms(uint16_t interval) {
     
     Serial.print(SoC / 100);
     Serial.print(".");
+    if ((SoC % 100) < 10) {
+      Serial.print("0");
+    }
     Serial.print(SoC % 100);
     Serial.println("%");
 #endif
@@ -302,14 +315,14 @@ void startCellComms(uint16_t interval) {
     // Check conditions to turn the charger ON
     // if any cells are under-voltage then turn the charger on
     if (cellsUndervolt > 0) {
-      digitalWrite(RELAY_PIN, HIGH);   // turn charger on
+      digitalWrite(CHARGER_PIN, HIGH);   // turn charger on
 
       beeps               = 4;
     }
     // enable charger if SoC < 80% ?
     if (cellMaxMillivolt < 3500)
     {
-      digitalWrite(RELAY_PIN, HIGH);
+      digitalWrite(CHARGER_PIN, HIGH);
     }
     // TODO: may have a manual CHARGE button as well.
 
@@ -317,17 +330,17 @@ void startCellComms(uint16_t interval) {
     // Check conditions to turn charger OFF
     // if all the cells are balancing then turn the charger off
     if (cellsBalancing == NUM_CELLS) {
-      digitalWrite(RELAY_PIN, LOW);   // turn charger off
+      digitalWrite(CHARGER_PIN, LOW);   // turn charger off
     }
     // if any cells are overvoltage then turn the charger off
     if (cellsOvervolt > 0) {
-      digitalWrite(RELAY_PIN, LOW);   // turn charger off
+      digitalWrite(CHARGER_PIN, LOW);   // turn charger off
 
       beeps               = 2;
     }
     // if any cells are over-temperature then turn the charger off
     if (cellsOvertemp > 0) {
-      digitalWrite(RELAY_PIN, LOW);   // turn charger off
+      digitalWrite(CHARGER_PIN, LOW);   // turn charger off
 
       beeps               = 3;
     }
@@ -340,28 +353,54 @@ void startCellComms(uint16_t interval) {
       digitalWrite(HEATER_PIN, LOW);
     }
 
-    if (lowestVoltage < cellMinMillivolt) {
+    if (lowestVoltage > cellMinMillivolt) {
       lowestVoltage       = cellMinMillivolt;
+      lowestCell          = cellMinVnum;
     }
+
+    if (hottestTemp < cellMaxTemp) {
+      hottestTemp         = cellMaxTemp;
+      hottestCell         = cellMaxTnum;
+    }
+    
 
 
     // Prepare a JSON payload string
     String payload = "{\"battery\": {\r";   // 14 chars
-    payload += "\t\"num cells\":";          // 13 chars - 27 total
-    payload += NUM_CELLS;                   // 2 chars - 29 total
-    payload += ",\r";                       // 2 char - 31 total
-    payload += "\t\"voltage\":";            // 11 chars - 42 total
+    payload += "\t\"num cells\": ";         // 14 chars - 28 total
+    payload += NUM_CELLS;                   // 2 chars - 30 total
+    payload += ",\r";                       // 2 char - 32 total
+    payload += "\t\"voltage\": ";           // 12 chars - 44 total
     payload += (cellMeanMillivolt * NUM_CELLS); 
     payload += ",\r";                       // 2 chars
-    payload += "\t\"current\":";            // 11 chars
+    payload += "\t\"current\": ";           // 12 chars
     payload += aveMilliAmps;
     payload += ",\r";                       // 2 chars
-    payload += "\t\"temperature\":";        // 15 chars
+    payload += "\t\"temperature\": ";       // 16 chars
     payload += cellAveTemp; 
     payload += ",\r";                       // 2 chars
-    payload += "\t\"SoC\":";                // 7 chars
+    payload += "\t\"SoC\": ";               // 8 chars
     payload += SoC;
-    // TODO:
+    payload += ",\r";                       // 2 chars
+    payload += "\t\"charger\": ";           // 12 chars
+    payload += "ON";
+    payload += ",\r";                       // 2 chars
+    payload += "\t\"heater\": ";            // 11 chars
+    payload += "ON";
+    payload += ",\r";                       // 2 chars
+    payload += "\t\"disconnect\": ";        // 15 chars
+    payload += "ON";
+    payload += ",\r";                       // 2 chars
+    payload += "\t\"cell mean\": ";         // 14 chars
+    payload += cellMeanMillivolt;
+    payload += ",\r";                       // 2 chars
+    payload += "\t\"cells\": [\r";          // 12 chars
+    for (int i = 0; i < NUM_CELLS; ++i) {
+      payload += "\t\t\"id\": ";            // 8 chars
+      payload += i;
+      payload += ", \"mv\": ";              // 8 chars
+      // TODO:
+    }
     payload += "\r}}";                      // 3 chars
 
     // Send payload
@@ -448,8 +487,9 @@ void    beeper(void) {
   ***************************************************/
   void  updateSoC(void)
   {
-    static unsigned int relaxedTime    = 0;
+    static unsigned int relaxedTime   = 0;
     static long tmpMAs    = 0;
+    static uint8_t  socInitialised    = 0;
     long        SoCMinimum;
     
 #if (0 != READ_CURRENT)
@@ -500,27 +540,36 @@ void    beeper(void) {
         
         // TODO: need to add a compensation for temperature
   
-        // TODO: need an external library to convert open-circuit voltage (compensated for current and temperature into SoC
+        // TODO: need to compensate for current and temperature
         socs.getSoC(cellMeanMillivolt, socArray);
 
-        if (SoC > socArray[1]) {
-          SoC             = socArray[1];
+        if (0 == socInitialised) {
+          SoC             = socArray[0];
         }
-        else if (SoC < socArray[2]) {
-          SoC             = socArray[2];
-        }
-        else if (SoC < socArray[0]) {
-          if (SoC < SOC_MAX) {
-            ++SoC;
+        else {
+          if (SoC > socArray[1]) {
+            SoC           = socArray[1];
           }
-        }
-        else if (SoC > socArray[0]) {
-          if (SoC > 0) {
-            --SoC;
+          else if (SoC < socArray[2]) {
+            SoC           = socArray[2];
           }
-        }
+          else if (SoC < socArray[0]) {
+            if ((SoC + 10) < socArray[0]) {
+              SoC         += 2;
+            }
+            else {
+              ++SoC;
+            }
+          }
+          else if (SoC > socArray[0]) {
+            if (SoC > 0) {
+              --SoC;
+            }
+          }
+        } // end of else socInitialised
 
         relaxedTime       = 0;
+        socInitialised    = 1;
       }
     } // end of else low current
 #endif  // (0 != READ_CURRENT)
@@ -663,16 +712,13 @@ void    beeper(void) {
     int bar   = (SOC_MAX / 20);
     while (bar < SOC_MAX) {
       if (bar <= SoC) {
-        lcd.print("B");
+        lcd.print((char)255);
       }
       else {
         lcd.print(" ");
       }
       bar     += (SOC_MAX / 20);
     } // end of while bar < 100%
-//    lcd.print(SoC / 100);
-//    lcd.print(".");
-//    lcd.print(SoC % 100);
 #else // NO BARGRAPH
 #if (0 == DETAILED_INFO)
     lcd.print("Chrgr ");
