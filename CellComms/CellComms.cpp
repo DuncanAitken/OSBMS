@@ -181,6 +181,54 @@ int CellComms::readCells(void)
 
 
 /***********************************************************
+	@brief	returns the millivolts of the cell.
+	@param	cell: the cell number 1 - NUM_CELLS.
+***********************************************************/
+int CellComms::getCellV(uint8_t cell)
+{
+	int retVal			= 0;
+	
+	if ( (cell != 0) && (cell <= NUM_CELLS) ) {
+		retVal			= _cellDataArray[cell - 1].millivolts;
+	}
+	
+	return retVal;
+} // end of getCellV ---------------------------------------
+
+
+/***********************************************************
+	@brief	returns the temperature of the cell.
+	@param	cell: the cell number 1 - NUM_CELLS.
+***********************************************************/
+int CellComms::getCellT(uint8_t cell)
+{
+	int retVal			= 0;
+	
+	if ( (cell != 0) && (cell <= NUM_CELLS) ) {
+		retVal			= _cellDataArray[cell - 1].temperature;
+	}
+	
+	return retVal;
+} // end of getCellT ---------------------------------------
+
+
+/***********************************************************
+	@brief	returns the balancing load of the cell.
+	@param	cell: the cell number 1 - NUM_CELLS.
+***********************************************************/
+int CellComms::getCellLoad(uint8_t cell)
+{
+	int retVal			= 0;
+	
+	if ( (cell != 0) && (cell <= NUM_CELLS) ) {
+		retVal			= _cellDataArray[cell - 1].balancing;
+	}
+	
+	return retVal;
+} // end of getCellLoad ------------------------------------
+
+
+/***********************************************************
 	@brief	returns the average millivolts of all cells.
 ***********************************************************/
 int CellComms::getCellsAveV(void)
