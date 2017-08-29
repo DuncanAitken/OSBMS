@@ -105,7 +105,9 @@ int socArray[3];
 #endif  // (0 != SOC_ESTIMATOR)
 
 CellComms cells;                          // constructor for the CellComms library
+#if (0 != SOC_ESTIMATOR)
 BatteryLookup socs;
+#endif  // (0 != SOC_ESTIMATOR)
 
 #if (0 != LCD_DISPLAY)
 LiquidCrystal_I2C       lcd(I2C_ADDR, En_pin, Rw_pin, Rs_pin, D4_pin, D5_pin, D6_pin, D7_pin);
@@ -156,7 +158,7 @@ void setup() {
   lcd.setCursor(0, 1);
   lcd.print("     BMS master     ");   // NB must be 20 characters or it garbles
   lcd.setCursor(0, 2);
-  lcd.print("    28 Aug 2017     ");   // NB must be 20 characters or it garbles
+  lcd.print("    29 Aug 2017     ");   // NB must be 20 characters or it garbles
   lcd.setCursor(0, 3);
   lcd.print("Ants, Duncan & Dave ");   // NB must be 20 characters or it garbles
 
@@ -169,15 +171,17 @@ void setup() {
   beepGap             = 0;
   lowestVoltage       = 3600;
   hottestTemp         = 1;              // 0.1c
-  SoC                 = (SOC_MAX / 2);  // 50%
+  currentMillis       = millis();
+  sendMillis          = (currentMillis + 100);
 #if (0 != READ_CURRENT)
   aveMilliAmps        = 0;
   milliAmpHours       = BATT_MAH;       // Initialise to a full Battery
-#endif  // (0 != READ_CURRENT)
-  currentMillis       = millis();
-  sendMillis          = (currentMillis + 100);
   readAmpsMillis      = (currentMillis + 50);
+#endif  // (0 != READ_CURRENT)
+#if (0 != SOC_ESTIMATOR)
+  SoC                 = (SOC_MAX / 2);  // 50%
   updateSoCMillis     = (currentMillis + 1025);
+#endif  // (0 != SOC_ESTIMATOR)
 //  ScreenRefreshMillis = (currentMillis + 1033);
 }
 
@@ -204,11 +208,13 @@ void loop() {
   } // end of readMillis
 #endif  // READ_CURRENT
 
+#if (0 != SOC_ESTIMATOR)
   if (currentMillis >= updateSoCMillis) {
     updateSoC();
 
     updateSoCMillis       += SOC_UPDATE_MS;
   }
+#endif  // (0 != SOC_ESTIMATOR)
 
   if (currentMillis != lastMillis) {
     beeper();
@@ -263,8 +269,10 @@ void startCellComms(uint16_t interval) {
   int cellsRead         = cells.readCells();
   
 #ifdef debug
-  Serial.print("\rRead ");
-  Serial.println(cellsRead);
+  Serial.print("Read ");
+  Serial.print(cellsRead);
+  Serial.print("/");
+  Serial.println(NUM_CELLS);
 #endif
     
 //  if (cellsRead == NUM_CELLS) {
@@ -283,34 +291,6 @@ void startCellComms(uint16_t interval) {
     int cellMaxVnum       = cells.getMaxVCell();
     int cellMinTnum       = cells.getMinTCell();
     int cellMaxTnum       = cells.getMaxTCell();
-  
-#ifdef debug
-    Serial.print("mean ");
-    Serial.print(cellMeanMillivolt);
-    Serial.print(", min ");
-    Serial.print(cellMinMillivolt);
-    Serial.print(", max ");
-    Serial.print(cellMaxMillivolt);
-    Serial.print(", delta ");
-    Serial.println(cellMaxMillivolt - cellMinMillivolt);
-    
-    Serial.print("UV ");
-    Serial.print(cellsUndervolt);
-    Serial.print(", OV ");
-    Serial.print(cellsOvervolt);
-    Serial.print(", HT ");
-    Serial.print(cellsOvertemp);
-    Serial.print(", Load ");
-    Serial.println(cellsBalancing);
-    
-    Serial.print(SoC / 100);
-    Serial.print(".");
-    if ((SoC % 100) < 10) {
-      Serial.print("0");
-    }
-    Serial.print(SoC % 100);
-    Serial.println("%");
-#endif
 
     // Check conditions to turn the charger ON
     // if any cells are under-voltage then turn the charger on
@@ -362,6 +342,53 @@ void startCellComms(uint16_t interval) {
       hottestTemp         = cellMaxTemp;
       hottestCell         = cellMaxTnum;
     }
+  
+#ifdef debug
+    Serial.print("mean ");
+    Serial.print(cellMeanMillivolt);
+    Serial.print(", min ");
+    Serial.print(cellMinMillivolt);
+    Serial.print(", max ");
+    Serial.print(cellMaxMillivolt);
+    Serial.print(", delta ");
+    Serial.println(cellMaxMillivolt - cellMinMillivolt);
+    
+    Serial.print("sent mean ");
+    Serial.print(sentVoltage);
+    Serial.print(", lowest ");
+    Serial.print(lowestVoltage);
+    Serial.print(": ");
+    Serial.print(lowestCell);
+    Serial.print(", hottest ");
+    Serial.print(hottestTemp);
+    Serial.print(": ");
+    Serial.println(hottestCell);
+    
+    Serial.print("UV ");
+    Serial.print(cellsUndervolt);
+    Serial.print(", OV ");
+    Serial.print(cellsOvervolt);
+    Serial.print(", HT ");
+    Serial.print(cellsOvertemp);
+    Serial.print(", Load ");
+    Serial.print(cellsBalancing);
+    Serial.print(", Charger ");
+    Serial.print(digitalRead(CHARGER_PIN));
+    Serial.print(", Heater ");
+    Serial.print(digitalRead(HEATER_PIN));
+    Serial.print(", Disconnect ");
+    Serial.println(digitalRead(DISCONNECT_PIN));
+    
+#if (0 != SOC_ESTIMATOR)
+    Serial.print(SoC / 100);
+    Serial.print(".");
+    if ((SoC % 100) < 10) {
+      Serial.print("0");
+    }
+    Serial.print(SoC % 100);
+    Serial.println("%");
+#endif  // (0 != SOC_ESTIMATOR)
+#endif
     
 
 
@@ -371,42 +398,60 @@ void startCellComms(uint16_t interval) {
     payload += NUM_CELLS;                   // 2 chars - 30 total
     payload += ",\r";                       // 2 char - 32 total
     payload += "\t\"voltage\": ";           // 12 chars - 44 total
-    payload += (cellMeanMillivolt * NUM_CELLS); 
-    payload += ",\r";                       // 2 chars
-    payload += "\t\"current\": ";           // 12 chars
-    payload += aveMilliAmps;
-    payload += ",\r";                       // 2 chars
-    payload += "\t\"temperature\": ";       // 16 chars
-    payload += cellAveTemp; 
-    payload += ",\r";                       // 2 chars
-    payload += "\t\"SoC\": ";               // 8 chars
+    payload += (cellMeanMillivolt * NUM_CELLS);  // 4 chars - 48 total
+    payload += ",\r";                       // 2 chars - 50 total
+    payload += "\t\"current\": ";           // 12 chars - 62 total
+#if (0 != READ_CURRENT)
+    payload += aveMilliAmps;                // 4 chars - 66 total
+#else // (0 != READ_CURRENT)
+    payload += "0";
+#endif  // (0 != READ_CURRENT)
+    payload += ",\r";                       // 2 chars - 68 total
+    payload += "\t\"temperature\": ";       // 16 chars - 84 total
+    payload += cellAveTemp;                 // 4 chars - 88 total 
+    payload += ",\r";                       // 2 chars - 90 total
+    payload += "\t\"SoC\": ";               // 8 chars - 98 total
+#if (0 != SOC_ESTIMATOR)
     payload += SoC;
+#else
+    payload += "0";
+#endif  // (0 != SOC_ESTIMATOR)
     payload += ",\r";                       // 2 chars
     payload += "\t\"charger\": ";           // 12 chars
-    payload += "ON";
+    payload += digitalRead(CHARGER_PIN);
     payload += ",\r";                       // 2 chars
     payload += "\t\"heater\": ";            // 11 chars
-    payload += "ON";
+    payload += digitalRead(HEATER_PIN);
     payload += ",\r";                       // 2 chars
     payload += "\t\"disconnect\": ";        // 15 chars
-    payload += "ON";
+    payload += digitalRead(DISCONNECT_PIN);
     payload += ",\r";                       // 2 chars
     payload += "\t\"cell mean\": ";         // 14 chars
-    payload += cellMeanMillivolt;
+    payload += sentVoltage;   // what we send as the mean
     payload += ",\r";                       // 2 chars
     payload += "\t\"cells\": [\r";          // 12 chars
     for (int i = 0; i < NUM_CELLS; ++i) {
       payload += "\t\t\"id\": ";            // 8 chars
       payload += i;
       payload += ", \"mv\": ";              // 8 chars
-      // TODO:
+      payload += cells.getCellV(i + 1);
+      payload += ", \"temp\": ";            // 10 chars
+      payload += cells.getCellT(i + 1);
+      payload += ", \"load\": ";            // 10 chars
+      payload += cells.getCellLoad(i + 1);    // TODO:
+      payload += "}";                       // 1 chars
+      if (i < NUM_CELLS - 1) {
+        payload += ",\r";                   // 2 chars
+      }
+      else {
+        payload += "\r\t]\r";               // 4 chars
+      }
     }
     payload += "\r}}";                      // 3 chars
 
     // Send payload
-    char attributes[200];
-    payload.toCharArray( attributes, 200 );
-//    client.publish( "v1/devices/me/telemetry", attributes );
+    char attributes[500];
+    payload.toCharArray( attributes, 500 );
     Serial1.println( attributes );
 
   
@@ -677,6 +722,7 @@ void    beeper(void) {
     lcd.print((abs(aveMilliAmps % 1000) / 100));
     lcd.print("A  ");
 #endif  // READ_CURRENT
+#if (0 != SOC_ESTIMATOR)
     int pos = 16;
     if (SoC < SOC_MAX) {    // <100% 
       ++pos;
@@ -687,6 +733,7 @@ void    beeper(void) {
     lcd.setCursor(pos, 2);
     lcd.print(SoC / 100);   // only show whole percentages
     lcd.print("%");
+#endif  // (0 != SOC_ESTIMATOR)
 #else // DETAILED_INFO
     lcd.print("Min ");
     lcd.print(cellMinMillivolt);
@@ -709,6 +756,7 @@ void    beeper(void) {
     // Line 4
     lcd.setCursor(0, 3);
 #if (0 != SHOW_BARGRAPH)
+#if (0 != SOC_ESTIMATOR)
     int bar   = (SOC_MAX / 20);
     while (bar < SOC_MAX) {
       if (bar <= SoC) {
@@ -719,6 +767,7 @@ void    beeper(void) {
       }
       bar     += (SOC_MAX / 20);
     } // end of while bar < 100%
+#endif  // (0 != SOC_ESTIMATOR)
 #else // NO BARGRAPH
 #if (0 == DETAILED_INFO)
     lcd.print("Chrgr ");
