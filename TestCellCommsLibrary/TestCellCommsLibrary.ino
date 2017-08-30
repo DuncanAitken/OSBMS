@@ -79,12 +79,12 @@ https://bitbucket.org/fmalpartida/new-liquidcrystal/downloads/
 #endif // LCD_DISPLAY
 
 
-unsigned int cellMeanMillivolt  = 3600;   // initiate with a high mean value so the loads don't turn on.
-unsigned int sentVoltage        = 3600;
+unsigned int cellMeanMillivolt  = 3600;
+unsigned int sentVoltage        = 3600;   // initiate with a high mean value so the loads don't turn on.
 unsigned int lowestVoltage;
-unsigned int lowestCell;
+unsigned int lowestCell;                  // cell number of the lowest ever cell
 unsigned int hottestTemp;
-unsigned int hottestCell;
+unsigned int hottestCell;                 // cell number of the hottest ever cell
 unsigned int beepTime;
 unsigned int beepGap;
 unsigned long currentMillis;
@@ -95,7 +95,7 @@ unsigned long updateSoCMillis;
 unsigned long ScreenRefreshMillis;
 byte beeps;                               // the number of times to beep the buzzer
 #if (0 != READ_CURRENT)
-long milliAmps;
+long milliAmps;                           // signed current reading in mA
 long aveMilliAmps;
 long milliAmpHours;
 #endif  // READ_CURRENT
@@ -104,6 +104,8 @@ unsigned int SoC;                         // State of Charge
 int socArray[3];
 #endif  // (0 != SOC_ESTIMATOR)
 
+
+// Constructors --------------------------
 CellComms cells;                          // constructor for the CellComms library
 #if (0 != SOC_ESTIMATOR)
 BatteryLookup socs;
@@ -113,10 +115,12 @@ BatteryLookup socs;
 LiquidCrystal_I2C       lcd(I2C_ADDR, En_pin, Rw_pin, Rs_pin, D4_pin, D5_pin, D6_pin, D7_pin);
 #endif  // LCD_DISPLAY
 
-void setup() {
-  Serial.begin(DEBUG_BAUD);
 
+// Setup ---------------------------------
+void setup() {
+  
 #ifdef debug
+  Serial.begin(DEBUG_BAUD);
   Serial.println("Starting...");
 #endif
   
@@ -173,6 +177,7 @@ void setup() {
   hottestTemp         = 1;              // 0.1c
   currentMillis       = millis();
   sendMillis          = (currentMillis + 100);
+  readMillis          = (sendMillis + CELL_READ_MS);
 #if (0 != READ_CURRENT)
   aveMilliAmps        = 0;
   milliAmpHours       = BATT_MAH;       // Initialise to a full Battery
@@ -183,8 +188,10 @@ void setup() {
   updateSoCMillis     = (currentMillis + 1025);
 #endif  // (0 != SOC_ESTIMATOR)
 //  ScreenRefreshMillis = (currentMillis + 1033);
-}
+} // end of setup ----------------------
 
+
+// Loop --------------------------------
 void loop() {
   unsigned long lastMillis      = 0;
   
@@ -333,12 +340,12 @@ void startCellComms(uint16_t interval) {
       digitalWrite(HEATER_PIN, LOW);
     }
 
-    if (lowestVoltage > cellMinMillivolt) {
+    if ( (lowestVoltage > cellMinMillivolt) && (cellMinMillivolt > 1900) ) {
       lowestVoltage       = cellMinMillivolt;
       lowestCell          = cellMinVnum;
     }
 
-    if (hottestTemp < cellMaxTemp) {
+    if ( (hottestTemp < cellMaxTemp) && (cellMaxTemp < 999) ) {
       hottestTemp         = cellMaxTemp;
       hottestCell         = cellMaxTnum;
     }
@@ -393,65 +400,81 @@ void startCellComms(uint16_t interval) {
 
 
     // Prepare a JSON payload string
-    String payload = "{\"battery\": {\r";   // 14 chars
-    payload += "\t\"num cells\": ";         // 14 chars - 28 total
-    payload += NUM_CELLS;                   // 2 chars - 30 total
-    payload += ",\r";                       // 2 char - 32 total
-    payload += "\t\"voltage\": ";           // 12 chars - 44 total
-    payload += (cellMeanMillivolt * NUM_CELLS);  // 4 chars - 48 total
-    payload += ",\r";                       // 2 chars - 50 total
-    payload += "\t\"current\": ";           // 12 chars - 62 total
+    String payload = "{\"battery\": {\r";     // 14 chars
+    payload += "\t\"num cells\": \"";         // 15 chars - 29 total
+    payload += NUM_CELLS;                     // 2 chars - 31 total
+    payload += "\",\r";                       // 3 char - 34 total
+    payload += "\t\"voltage\": \"";           // 13 chars - 47 total
+    unsigned int totalV = (cellMeanMillivolt * NUM_CELLS);
+    payload += (totalV / 1000);               // 2 chars - 49 total
+    payload += ".";                           // 1 chars - 50 total
+    if ((totalV % 1000) < 100) {
+      payload += "0";     // insert leading zero
+    }
+    payload += ((totalV % 1000) / 10);        // 2 chars - 52 total
+    payload += "\",\r";                       // 3 chars - 55 total
+    payload += "\t\"current\": \"";           // 13 chars - 68 total
 #if (0 != READ_CURRENT)
-    payload += aveMilliAmps;                // 4 chars - 66 total
+    payload += aveMilliAmps;                  // 4 chars - 72 total
 #else // (0 != READ_CURRENT)
     payload += "0";
 #endif  // (0 != READ_CURRENT)
-    payload += ",\r";                       // 2 chars - 68 total
-    payload += "\t\"temperature\": ";       // 16 chars - 84 total
-    payload += cellAveTemp;                 // 4 chars - 88 total 
-    payload += ",\r";                       // 2 chars - 90 total
-    payload += "\t\"SoC\": ";               // 8 chars - 98 total
+    payload += "\",\r";                       // 3 chars - 75 total
+    payload += "\t\"temperature\": \"";       // 17 chars - 92 total
+    payload += (cellAveTemp / 10);            // 2 chars - 94 total
+    payload += ".";                           // 1 chars - 95 total
+    payload += (cellAveTemp % 10);            // 1 chars - 96 total
+    payload += "\",\r";                       // 3 chars - 99 total
+    payload += "\t\"SoC\": \"";               // 9 chars - 108 total
 #if (0 != SOC_ESTIMATOR)
-    payload += SoC;
+    payload += (SoC / 100);                   // 3 chars - 111 total
+    payload += ".";                           // 1 chars - 112 total
+    if ((SoC % 100) < 10) {
+      payload += "0";     // add a leading zero
+    }
+    payload += (SoC % 100);                   // 2 chars - 114 total
 #else
-    payload += "0";
+    payload += "0.00";
 #endif  // (0 != SOC_ESTIMATOR)
-    payload += ",\r";                       // 2 chars
-    payload += "\t\"charger\": ";           // 12 chars
-    payload += digitalRead(CHARGER_PIN);
-    payload += ",\r";                       // 2 chars
-    payload += "\t\"heater\": ";            // 11 chars
-    payload += digitalRead(HEATER_PIN);
-    payload += ",\r";                       // 2 chars
-    payload += "\t\"disconnect\": ";        // 15 chars
-    payload += digitalRead(DISCONNECT_PIN);
-    payload += ",\r";                       // 2 chars
-    payload += "\t\"cell mean\": ";         // 14 chars
-    payload += sentVoltage;   // what we send as the mean
-    payload += ",\r";                       // 2 chars
-    payload += "\t\"cells\": [\r";          // 12 chars
+    payload += "\",\r";                       // 3 chars - 117 total
+    payload += "\t\"charger\": \"";           // 13 chars - 130 total
+    payload += digitalRead(CHARGER_PIN);      // 1 chars - 131 total
+    payload += "\",\r";                       // 3 chars - 134 total
+    payload += "\t\"heater\": \"";            // 12 chars - 146 total
+    payload += digitalRead(HEATER_PIN);       // 1 chars - 147 total
+    payload += "\",\r";                       // 3 chars - 150 total
+    payload += "\t\"disconnect\": \"";        // 16 chars - 166 total
+    payload += digitalRead(DISCONNECT_PIN);   // 1 chars - 167 total
+    payload += "\",\r";                       // 2 chars - 169 total
+    payload += "\t\"sent mean\": \"";         // 16 chars - 185 total
+    payload += sentVoltage;   // what we send as the mean to the cells
+    payload += "\",\r";                       // 3 chars
+    payload += "\t\"cells\": [\r";            // 12 chars
     for (int i = 0; i < NUM_CELLS; ++i) {
-      payload += "\t\t\"id\": ";            // 8 chars
-      payload += i;
-      payload += ", \"mv\": ";              // 8 chars
+      payload += "\t\t{\"id\": \"";           // 10 chars
+      payload += (i + 1);                     // 2 chars
+      payload += "\", \"mv\": \"";            // 8 chars
       payload += cells.getCellV(i + 1);
-      payload += ", \"temp\": ";            // 10 chars
-      payload += cells.getCellT(i + 1);
-      payload += ", \"load\": ";            // 10 chars
-      payload += cells.getCellLoad(i + 1);    // TODO:
-      payload += "}";                       // 1 chars
+      payload += "\", \"temp\": \"";          // 10 chars
+      unsigned int cellT = cells.getCellT(i + 1);
+      payload += (cellT / 10);
+      payload += ".";
+      payload += (cellT % 10);
+      payload += "\", \"load\": \"";          // 10 chars
+      payload += cells.getCellLoad(i + 1);
+      payload += "\"}";                       // 1 chars
       if (i < NUM_CELLS - 1) {
-        payload += ",\r";                   // 2 chars
+        payload += ",\r";                     // 2 chars
       }
       else {
-        payload += "\r\t]\r";               // 4 chars
+        payload += "\r\t]\r";                 // 4 chars
       }
     }
-    payload += "\r}}";                      // 3 chars
+    payload += "}}";                          // 3 chars
 
     // Send payload
-    char attributes[500];
-    payload.toCharArray( attributes, 500 );
+    char attributes[1150];                    // actually 1140 chars
+    payload.toCharArray( attributes, 1150 );
     Serial1.println( attributes );
 
   
