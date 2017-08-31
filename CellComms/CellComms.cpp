@@ -117,20 +117,24 @@ int CellComms::readCells(void)
     fecDecode(&payload[0], &decoded[0], sizeof(payload));
     
 	if ((decoded[0] & 0x60) == 0) {
-    // Interpret decoded values.
-    // Bytes 0 and 1 make up the voltage.
-    // Bytes 2 and 3 make up the temperature.
-	tempMillivolts									= ((decoded[0] & 0x1F) << 8) + decoded[1];
-	if ( (tempMillivolts > 1900)				// The regulator colapses at 2v
-			&& (tempMillivolts < 5100) ) {		// the adc will max out at 5v
-		// read the data into a temporary buffer so we can validate it.
-		_cellDataBuffer[cellNum].millivolts			= tempMillivolts;
-		_cellDataBuffer[cellNum].temperature		= ((decoded[2] & 0x0F) << 8) + decoded[3];
-		_cellDataBuffer[cellNum].balancing			= ((decoded[0] & 0x80) >> 7);
-		_cellDataBuffer[cellNum].overTemperature	= ((decoded[2] & 0x80) >> 7);
-		_cellDataBuffer[cellNum].overVoltage		= ((decoded[2] & 0x40) >> 6);
-		_cellDataBuffer[cellNum].underVoltage		= ((decoded[2] & 0x20) >> 5);
-		} // end of if mV makes sense
+      // Interpret decoded values.
+      // Bytes 0 and 1 make up the voltage.
+      // Bytes 2 and 3 make up the temperature.
+	  tempMillivolts								= ((decoded[0] & 0x1F) << 8) + decoded[1];
+	  unsigned int temperature						= ((decoded[2] & 0x0F) << 8) + decoded[3];
+	  // if ( (tempMillivolts > 1900)				// The regulator colapses at 2v
+			  // && (tempMillivolts < 5100)		    // the adc will max out at 5v
+			  // && (temperature < 1100) ) {		// the adc will max out at 5v
+		  // read the data into a temporary buffer so we can validate it.
+		  // _cellDataBuffer[cellNum].millivolts	= tempMillivolts;
+		  // _cellDataBuffer[cellNum].temperature	= temperature;
+		  _cellDataBuffer[cellNum].millivolts		= ((decoded[0] & 0x1F) << 8) + decoded[1];
+		  _cellDataBuffer[cellNum].temperature		= ((decoded[2] & 0x0F) << 8) + decoded[3];
+		  _cellDataBuffer[cellNum].balancing		= ((decoded[0] & 0x80) >> 7);
+		  _cellDataBuffer[cellNum].overTemperature	= ((decoded[2] & 0x80) >> 7);
+		  _cellDataBuffer[cellNum].overVoltage		= ((decoded[2] & 0x40) >> 6);
+		  _cellDataBuffer[cellNum].underVoltage		= ((decoded[2] & 0x20) >> 5);
+		// } // end of if mV makes sense
 	} // end of if valid cell data
 
 	if ((decoded[2] & 0xE0) == 0xE0) {
@@ -147,24 +151,29 @@ int CellComms::readCells(void)
   // copy temp buffer starting at (NUM_CELLS - cellNum)
   if (cellNum <= NUM_CELLS) {
 	for (int i = 0; i < cellNum; ++i) {
-		_cellDataArray[i + (NUM_CELLS - cellNum)].millivolts		= _cellDataBuffer[i].millivolts;
-		_cellDataArray[i + (NUM_CELLS - cellNum)].temperature		= _cellDataBuffer[i].temperature;
-		_cellDataArray[i + (NUM_CELLS - cellNum)].balancing		= _cellDataBuffer[i].balancing;
-		unsigned char temp											= _cellDataBuffer[i].overTemperature;
-		if (lastOvertemp[i + (NUM_CELLS - cellNum)] == temp) {
-			_cellDataArray[i + (NUM_CELLS - cellNum)].overTemperature	= temp;
-		}
-		lastOvertemp[i + (NUM_CELLS - cellNum)]					= temp;
-		temp														= _cellDataBuffer[i].overVoltage;
-		if (lastOvervolt[i + (NUM_CELLS - cellNum)] == temp) {
-			_cellDataArray[i + (NUM_CELLS - cellNum)].overVoltage	= temp;
-		}
-		lastOvervolt[i + (NUM_CELLS - cellNum)]					= temp;
-		temp														= _cellDataBuffer[i].underVoltage;
-		if (lastUndervolt[i + (NUM_CELLS - cellNum)] == temp) {
-			_cellDataArray[i + (NUM_CELLS - cellNum)].underVoltage	= temp;
-		}
-		lastUndervolt[i + (NUM_CELLS - cellNum)]					= temp;
+		// validate the data before we copy it to the array.
+		if ( (_cellDataBuffer[i].millivolts > 1900)				// The regulator colapses at 2v
+			  && (_cellDataBuffer[i].millivolts < 5100)		    // the adc will max out at 5v
+			  && (_cellDataBuffer[i].temperature < 1100) ) {		    // the adc will max out at 5v
+			_cellDataArray[i + (NUM_CELLS - cellNum)].millivolts		= _cellDataBuffer[i].millivolts;
+			_cellDataArray[i + (NUM_CELLS - cellNum)].temperature		= _cellDataBuffer[i].temperature;
+			_cellDataArray[i + (NUM_CELLS - cellNum)].balancing		= _cellDataBuffer[i].balancing;
+			unsigned char temp											= _cellDataBuffer[i].overTemperature;
+			if (lastOvertemp[i + (NUM_CELLS - cellNum)] == temp) {
+				_cellDataArray[i + (NUM_CELLS - cellNum)].overTemperature	= temp;
+			}
+			lastOvertemp[i + (NUM_CELLS - cellNum)]					= temp;
+			temp														= _cellDataBuffer[i].overVoltage;
+			if (lastOvervolt[i + (NUM_CELLS - cellNum)] == temp) {
+				_cellDataArray[i + (NUM_CELLS - cellNum)].overVoltage	= temp;
+			}
+			lastOvervolt[i + (NUM_CELLS - cellNum)]					= temp;
+			temp														= _cellDataBuffer[i].underVoltage;
+			if (lastUndervolt[i + (NUM_CELLS - cellNum)] == temp) {
+				_cellDataArray[i + (NUM_CELLS - cellNum)].underVoltage	= temp;
+			}
+			lastUndervolt[i + (NUM_CELLS - cellNum)]					= temp;
+		} // end of if valid data.
 	} // end of for each cell read
   }
   
