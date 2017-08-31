@@ -48,7 +48,6 @@ https://bitbucket.org/fmalpartida/new-liquidcrystal/downloads/
 #define CELL_READ_MS      (600)     // delay after send for the data to shift in
 #define AMPS_READ_LOOP_MS (100)     // interval in ms between reading the current sensor.
 #define SOC_UPDATE_MS     (1000)    // interval in ms between updating the State-of-Charge (SoC).
-#define SCREEN_REFRESH_MS (1000)    // how often the display is updated
 #define AMPS_OFFSET       (512)     // ~1/2 of the max ADC count as the current sensor is biased so it can read charge and dis-charge currents.
 #define AMPS_SCALAR       (97)      // scalar to convert the ADC count into the actual milliamps.
 #if (0 != SOC_ESTIMATOR)
@@ -92,7 +91,6 @@ unsigned long sendMillis;
 unsigned long readMillis;
 unsigned long readAmpsMillis;
 unsigned long updateSoCMillis;
-unsigned long ScreenRefreshMillis;
 byte beeps;                               // the number of times to beep the buzzer
 #if (0 != READ_CURRENT)
 long milliAmps;                           // signed current reading in mA
@@ -119,18 +117,17 @@ LiquidCrystal_I2C       lcd(I2C_ADDR, En_pin, Rw_pin, Rs_pin, D4_pin, D5_pin, D6
 // Setup ---------------------------------
 void setup() {
   
+  pinMode(HEART_LED_PIN, OUTPUT);       // Enable Heart LED
+  pinMode(FAULT_LED_PIN, OUTPUT);       // Enable Fault LED
+  pinMode(ALARM_LED_PIN, OUTPUT);       // Enable Alarm LED
+  pinMode(CHARGER_PIN, OUTPUT);         // Enable Charger
+  pinMode(HEATER_PIN, OUTPUT);          // Enable Heater
+  pinMode(DISCONNECT_PIN, OUTPUT);      // Enable Disconnect
+  
 #ifdef debug
   Serial.begin(DEBUG_BAUD);
   Serial.println("Starting...");
 #endif
-  
-  pinMode(HEART_LED_PIN, OUTPUT);       // Enable Heart LED
-  pinMode(FAULT_LED_PIN, OUTPUT);       // Enable Fault LED
-  pinMode(ALARM_LED_PIN, OUTPUT);       // Enable Alarm LED
-//  pinMode(RELAY_PIN, OUTPUT);           // Enable Relay
-  pinMode(CHARGER_PIN, OUTPUT);         // Enable Relay
-  pinMode(HEATER_PIN, OUTPUT);          // Enable Heater
-  pinMode(DISCONNECT_PIN, OUTPUT);      // Enable Relay
 
   // set serial 1 for the json streaming
   Serial1.begin(115200);
@@ -141,7 +138,7 @@ void setup() {
   lcd.setBacklightPin(BACKLIGHT_PIN, POSITIVE); // init the backlight
 #endif  // LCD_DISPLAY
   
-  digitalWrite(RELAY_PIN, LOW);
+//  digitalWrite(RELAY_PIN, LOW);
   digitalWrite(CHARGER_PIN, LOW);
   digitalWrite(HEATER_PIN, LOW);
   digitalWrite(DISCONNECT_PIN, LOW);
@@ -162,7 +159,7 @@ void setup() {
   lcd.setCursor(0, 1);
   lcd.print("     BMS master     ");   // NB must be 20 characters or it garbles
   lcd.setCursor(0, 2);
-  lcd.print("    29 Aug 2017     ");   // NB must be 20 characters or it garbles
+  lcd.print("    31 Aug 2017     ");   // NB must be 20 characters or it garbles
   lcd.setCursor(0, 3);
   lcd.print("Ants, Duncan & Dave ");   // NB must be 20 characters or it garbles
 
@@ -187,7 +184,6 @@ void setup() {
   SoC                 = (SOC_MAX / 2);  // 50%
   updateSoCMillis     = (currentMillis + 1025);
 #endif  // (0 != SOC_ESTIMATOR)
-//  ScreenRefreshMillis = (currentMillis + 1033);
 } // end of setup ----------------------
 
 
@@ -201,6 +197,10 @@ void loop() {
 
   if (currentMillis >= sendMillis) {
     startCellComms(CELL_READ_MS);
+
+    // wait for the cell data to arrive
+    readMillis        = (sendMillis + CELL_READ_MS);
+    sendMillis        += CELL_LOOP_MS;    // TODO: could make the interval a function of the battery current
   } // end of sendMillis
   
   if (currentMillis >= readMillis) {
@@ -247,10 +247,10 @@ void startCellComms(uint16_t interval) {
       sentVoltage       = (sentVoltage + cellMeanMillivolt) / 2;
     }
     // apply limits to the target value we tell the cells
-    if (sentVoltage < 3000) {
+    if (sentVoltage < 3000) {   // TODO: define these at the top of the sketch
       sentVoltage       = 3000;
     }
-    else if (sentVoltage > 3600) {
+    else if (sentVoltage > 3600) {   // TODO: define these at the top of the sketch
       sentVoltage       = 3600;
     }
 
@@ -260,10 +260,6 @@ void startCellComms(uint16_t interval) {
 #else
     cells.sendMillivolts(0);
 #endif
-
-    // wait for the cell data to arrive
-    readMillis        = (sendMillis + interval);
-    sendMillis        += CELL_LOOP_MS;    // TODO: could make the interval a function of the battery current
  } // end of startCellComms --------------------------
 
 
@@ -307,12 +303,12 @@ void startCellComms(uint16_t interval) {
       beeps               = 4;
     }
     // enable charger if SoC < 80% ?
-    if (cellMaxMillivolt < 3500)
+    if (cellMaxMillivolt < 3400)   // TODO: define these at the top of the sketch
     {
       digitalWrite(CHARGER_PIN, HIGH);
     }
+    
     // TODO: may have a manual CHARGE button as well.
-
 
     // Check conditions to turn charger OFF
     // if all the cells are balancing then turn the charger off
@@ -332,7 +328,7 @@ void startCellComms(uint16_t interval) {
       beeps               = 3;
     }
 
-    // Heater control
+    // Heater control ------------------
     if (cellAveTemp < 150) {
       digitalWrite(HEATER_PIN, HIGH);
     }
@@ -340,12 +336,24 @@ void startCellComms(uint16_t interval) {
       digitalWrite(HEATER_PIN, LOW);
     }
 
-    if ( (lowestVoltage > cellMinMillivolt) && (cellMinMillivolt > 1900) ) {
+    // Dis-connect control -----------------
+    if ( (cellAveTemp > 450)    // TODO: define these at the top of the sketch
+        || (cellMeanMillivolt > 3650)
+        || (cellMeanMillivolt < 2900) ) {
+      digitalWrite(DISCONNECT_PIN, HIGH);
+
+      beeps               = 6;
+    }
+    else {
+      digitalWrite(DISCONNECT_PIN, LOW);
+    }
+
+    if (lowestVoltage > cellMinMillivolt) {
       lowestVoltage       = cellMinMillivolt;
       lowestCell          = cellMinVnum;
     }
 
-    if ( (hottestTemp < cellMaxTemp) && (cellMaxTemp < 999) ) {
+    if (hottestTemp < cellMaxTemp) {
       hottestTemp         = cellMaxTemp;
       hottestCell         = cellMaxTnum;
     }
@@ -363,13 +371,13 @@ void startCellComms(uint16_t interval) {
     Serial.print("sent mean ");
     Serial.print(sentVoltage);
     Serial.print(", lowest ");
-    Serial.print(lowestVoltage);
-    Serial.print(": ");
     Serial.print(lowestCell);
-    Serial.print(", hottest ");
-    Serial.print(hottestTemp);
     Serial.print(": ");
-    Serial.println(hottestCell);
+    Serial.print(lowestVoltage);
+    Serial.print(", hottest ");
+    Serial.print(hottestCell);
+    Serial.print(": ");
+    Serial.println(hottestTemp);
     
     Serial.print("UV ");
     Serial.print(cellsUndervolt);
@@ -602,8 +610,8 @@ void    beeper(void) {
 //    else  if ( (aveMilliAmps < 100) && (aveMilliAmps > -100) )
     {
       ++relaxedTime;
-      if (relaxedTime > (60 * 5))   // 5 minutes
-      {
+      if ( (relaxedTime > (60 * 5))   // 5 minutes
+          || (0 == socInitialised) ) {
         // read Voc
         
         // TODO: need to add a compensation for temperature
