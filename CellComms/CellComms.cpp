@@ -81,6 +81,8 @@ void CellComms::sendMillivolts(int millivolts)
 	fecEncode(_tx_packet, 4);
 	
   int bytesSent					= Serial2.write(_tx_packet, 6);
+  
+  cellsRead						= 0;
 
   Serial2.flush();
 } // end of sendMillivolts ---------------------------------
@@ -122,12 +124,6 @@ int CellComms::readCells(void)
       // Bytes 2 and 3 make up the temperature.
 	  tempMillivolts								= ((decoded[0] & 0x1F) << 8) + decoded[1];
 	  unsigned int temperature						= ((decoded[2] & 0x0F) << 8) + decoded[3];
-	  // if ( (tempMillivolts > 1900)				// The regulator colapses at 2v
-			  // && (tempMillivolts < 5100)		    // the adc will max out at 5v
-			  // && (temperature < 1100) ) {		// the adc will max out at 5v
-		  // read the data into a temporary buffer so we can validate it.
-		  // _cellDataBuffer[cellNum].millivolts	= tempMillivolts;
-		  // _cellDataBuffer[cellNum].temperature	= temperature;
 		  _cellDataBuffer[cellNum].millivolts		= ((decoded[0] & 0x1F) << 8) + decoded[1];
 		  _cellDataBuffer[cellNum].temperature		= ((decoded[2] & 0x0F) << 8) + decoded[3];
 		  _cellDataBuffer[cellNum].balancing		= ((decoded[0] & 0x80) >> 7);
@@ -140,34 +136,37 @@ int CellComms::readCells(void)
 	if ((decoded[2] & 0xE0) == 0xE0) {
 		// reset the cell number as this was the seeding message
 		cellNum										= 0;
+		cellsRead									= 0;
 	}
 	else {
-		++cellNum;
+		// don't allow cellNum to exceed array size.
+		if (cellNum < (NUM_CELLS)) {
+			++cellNum;
+		}
+		++cellsRead;
 	}
   } // end of while packet available
-  
-  cellsRead											= cellNum;
   
   // copy temp buffer starting at (NUM_CELLS - cellNum)
   if (cellNum <= NUM_CELLS) {
 	for (int i = 0; i < cellNum; ++i) {
 		// validate the data before we copy it to the array.
-		if ( (_cellDataBuffer[i].millivolts > 1900)				// The regulator colapses at 2v
-			  && (_cellDataBuffer[i].millivolts < 5100)		    // the adc will max out at 5v
-			  && (_cellDataBuffer[i].temperature < 1100) ) {		    // the adc will max out at 5v
+		if ( (_cellDataBuffer[i].millivolts > 1900)						// The regulator colapses at 2v
+			  && (_cellDataBuffer[i].millivolts < 5100)		    		// the adc will max out at 5v
+			  && (_cellDataBuffer[i].temperature < 1100) ) {		    // the adc will max out at 105c
 			_cellDataArray[i + (NUM_CELLS - cellNum)].millivolts		= _cellDataBuffer[i].millivolts;
 			_cellDataArray[i + (NUM_CELLS - cellNum)].temperature		= _cellDataBuffer[i].temperature;
-			_cellDataArray[i + (NUM_CELLS - cellNum)].balancing		= _cellDataBuffer[i].balancing;
+			_cellDataArray[i + (NUM_CELLS - cellNum)].balancing			= _cellDataBuffer[i].balancing;
 			unsigned char temp											= _cellDataBuffer[i].overTemperature;
 			if (lastOvertemp[i + (NUM_CELLS - cellNum)] == temp) {
 				_cellDataArray[i + (NUM_CELLS - cellNum)].overTemperature	= temp;
 			}
-			lastOvertemp[i + (NUM_CELLS - cellNum)]					= temp;
+			lastOvertemp[i + (NUM_CELLS - cellNum)]						= temp;
 			temp														= _cellDataBuffer[i].overVoltage;
 			if (lastOvervolt[i + (NUM_CELLS - cellNum)] == temp) {
 				_cellDataArray[i + (NUM_CELLS - cellNum)].overVoltage	= temp;
 			}
-			lastOvervolt[i + (NUM_CELLS - cellNum)]					= temp;
+			lastOvervolt[i + (NUM_CELLS - cellNum)]						= temp;
 			temp														= _cellDataBuffer[i].underVoltage;
 			if (lastUndervolt[i + (NUM_CELLS - cellNum)] == temp) {
 				_cellDataArray[i + (NUM_CELLS - cellNum)].underVoltage	= temp;
@@ -175,7 +174,7 @@ int CellComms::readCells(void)
 			lastUndervolt[i + (NUM_CELLS - cellNum)]					= temp;
 		} // end of if valid data.
 	} // end of for each cell read
-  }
+  } // end of if cellNum valid
   
   // Read remaining bytes...
   bytes_available             						= Serial2.available(); 
