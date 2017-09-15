@@ -43,14 +43,21 @@ https://bitbucket.org/fmalpartida/new-liquidcrystal/downloads/
 
 // Settings
 #define BATT_MAH          (35000)   // 35Ah or 35,000mAh. yours may be larger!
+#define SENT_MEAN_MIN     (3000)    // minimum balancing millivolts sent to cells.
+#define SENT_MEAN_MAX     (3600)    // maximum balancing millivolts sent to cells.
+#define CHRG_ENABLE_MV    (3400)    // ~80% SoC - enable the charger when cells below this millivolts.
+#define HTR_ENABLE_TEMP   (150)     // 15.0c - enable the heater below this temperature.
+#define DISCON_OVERTEMP   (450)     // 45.0c - disconnect battery over this temperature.
+#define DISCON_OVERVOLT   (3650)    // disconnect battery over this millivolts.
+#define DISCON_UNDERVOLT  (2900)    // disconnect battery below this millivolts.
 #define DEBUG_BAUD        (9600)    // baudrate for debug comms to the console
 #define CELL_LOOP_MS      (9000)    // interval between cell data reads
 #define CELL_READ_MS      (600)     // delay after send for the data to shift in
 #define AMPS_READ_LOOP_MS (100)     // interval in ms between reading the current sensor.
-#define SOC_UPDATE_MS     (1000)    // interval in ms between updating the State-of-Charge (SoC).
 #define AMPS_OFFSET       (512)     // ~1/2 of the max ADC count as the current sensor is biased so it can read charge and dis-charge currents.
 #define AMPS_SCALAR       (97)      // scalar to convert the ADC count into the actual milliamps.
 #if (0 != SOC_ESTIMATOR)
+#define SOC_UPDATE_MS     (1000)    // interval in ms between updating the State-of-Charge (SoC).
 #define SOC_MAX           (SOC_100PCT)   // 100.00, 100% with 2 d.p.
 #endif  // SOC_ESTIMATOR
 
@@ -58,9 +65,10 @@ https://bitbucket.org/fmalpartida/new-liquidcrystal/downloads/
 #define ALARM_LED_PIN     (4)       // the buzzer on the shield board
 #define FAULT_LED_PIN     (5)       // the yellow LED on the shield board
 #define RELAY_PIN         (6)       // the relay on the shield board
-#define CHARGER_PIN       (RELAY_PIN)
-#define HEATER_PIN        (7)
-#define DISCONNECT_PIN    (8)
+#define CONNECT_PIN       (RELAY_PIN)
+#define HEATER_PIN        (7)       // enable the cell heater
+#define CHARGER_PIN       (8)       // enable/disable the charger
+//#define DISCONNECT_PIN    (8)
 #define HEART_LED_PIN     (13)
 #define AMPS_AN_PIN       (0)       // the ADC pin connected to the current sensor
 
@@ -105,6 +113,7 @@ int socArray[3];
 
 // Constructors --------------------------
 CellComms cells;                          // constructor for the CellComms library
+
 #if (0 != SOC_ESTIMATOR)
 BatteryLookup socs;
 #endif  // (0 != SOC_ESTIMATOR)
@@ -122,7 +131,8 @@ void setup() {
   pinMode(ALARM_LED_PIN, OUTPUT);       // Enable Alarm LED
   pinMode(CHARGER_PIN, OUTPUT);         // Enable Charger
   pinMode(HEATER_PIN, OUTPUT);          // Enable Heater
-  pinMode(DISCONNECT_PIN, OUTPUT);      // Enable Disconnect
+//  pinMode(DISCONNECT_PIN, OUTPUT);      // Enable Disconnect
+  pinMode(CONNECT_PIN, OUTPUT);         // Enable connect
   
 #ifdef debug
   Serial.begin(DEBUG_BAUD);
@@ -138,10 +148,10 @@ void setup() {
   lcd.setBacklightPin(BACKLIGHT_PIN, POSITIVE); // init the backlight
 #endif  // LCD_DISPLAY
   
-//  digitalWrite(RELAY_PIN, LOW);
   digitalWrite(CHARGER_PIN, LOW);
   digitalWrite(HEATER_PIN, LOW);
-  digitalWrite(DISCONNECT_PIN, LOW);
+//  digitalWrite(DISCONNECT_PIN, LOW);
+  digitalWrite(CONNECT_PIN, LOW);
   digitalWrite(HEART_LED_PIN, HIGH);
   digitalWrite(FAULT_LED_PIN, HIGH);
   delay(200); 
@@ -159,7 +169,7 @@ void setup() {
   lcd.setCursor(0, 1);
   lcd.print("     BMS master     ");   // NB must be 20 characters or it garbles
   lcd.setCursor(0, 2);
-  lcd.print("    31 Aug 2017     ");   // NB must be 20 characters or it garbles
+  lcd.print("    15 Sep 2017     ");   // NB must be 20 characters or it garbles
   lcd.setCursor(0, 3);
   lcd.print("Ants, Duncan & Dave ");   // NB must be 20 characters or it garbles
 
@@ -247,11 +257,11 @@ void startCellComms(uint16_t interval) {
       sentVoltage       = (sentVoltage + cellMeanMillivolt) / 2;
     }
     // apply limits to the target value we tell the cells
-    if (sentVoltage < 3000) {   // TODO: define these at the top of the sketch
-      sentVoltage       = 3000;
+    if (sentVoltage < SENT_MEAN_MIN) {
+      sentVoltage       = SENT_MEAN_MIN;
     }
-    else if (sentVoltage > 3600) {   // TODO: define these at the top of the sketch
-      sentVoltage       = 3600;
+    else if (sentVoltage > SENT_MEAN_MAX) {
+      sentVoltage       = SENT_MEAN_MAX;
     }
 
     // write 6 bytes to the BMS to initiate data transfer.
@@ -269,6 +279,7 @@ void startCellComms(uint16_t interval) {
  * if all cells read then do stuff with the data.
 ******************************************************/
  void readCellComms(void) {
+  static uint8_t  u8_disconnect_cntr  = 0;
   int cellsRead         = cells.readCells();
   
 #ifdef debug
@@ -302,9 +313,8 @@ void startCellComms(uint16_t interval) {
 
       beeps               = 4;
     }
-    // enable charger if SoC < 80% ?
-    if (cellMaxMillivolt < 3400)   // TODO: define these at the top of the sketch
-    {
+    // enable charger if SoC < x% ?
+    if (cellMaxMillivolt < CHRG_ENABLE_MV) {
       digitalWrite(CHARGER_PIN, HIGH);
     }
     
@@ -329,7 +339,7 @@ void startCellComms(uint16_t interval) {
     }
 
     // Heater control ------------------
-    if (cellAveTemp < 150) {
+    if (cellAveTemp < HTR_ENABLE_TEMP) {
       digitalWrite(HEATER_PIN, HIGH);
     }
     else {
@@ -337,17 +347,29 @@ void startCellComms(uint16_t interval) {
     }
 
     // Dis-connect control -----------------
-    if ( (cellAveTemp > 450)    // TODO: define these at the top of the sketch
-        || (cellMeanMillivolt > 3650)
-        || (cellMeanMillivolt < 2900) ) {
-      digitalWrite(DISCONNECT_PIN, HIGH);
-
-      beeps               = 6;
+    if ( (cellMaxTemp > DISCON_OVERTEMP)
+        || (cellMaxMillivolt > DISCON_OVERVOLT)
+        || (cellMinMillivolt < DISCON_UNDERVOLT) ) {
+      if (u8_disconnect_cntr < 3) {
+        ++u8_disconnect_cntr;
+      }
+      else {
+//        digitalWrite(DISCONNECT_PIN, HIGH);
+        digitalWrite(CONNECT_PIN, LOW);
+      }
+      beeps               = 6;          // sound warnings before and during disconnect
     }
     else {
-      digitalWrite(DISCONNECT_PIN, LOW);
+      if (u8_disconnect_cntr > 0) {
+        --u8_disconnect_cntr;
+      }
+      else {
+//        digitalWrite(DISCONNECT_PIN, LOW);
+        digitalWrite(CONNECT_PIN, HIGH);
+      }
     }
 
+    // Metrics -----------------------------
     if (lowestVoltage > cellMinMillivolt) {
       lowestVoltage       = cellMinMillivolt;
       lowestCell          = cellMinVnum;
@@ -391,8 +413,10 @@ void startCellComms(uint16_t interval) {
     Serial.print(digitalRead(CHARGER_PIN));
     Serial.print(", Heater ");
     Serial.print(digitalRead(HEATER_PIN));
-    Serial.print(", Disconnect ");
-    Serial.println(digitalRead(DISCONNECT_PIN));
+//    Serial.print(", Disconnect ");
+//    Serial.println(digitalRead(DISCONNECT_PIN));
+    Serial.print(", Connect ");
+    Serial.println(digitalRead(CONNECT_PIN));
     
 #if (0 != SOC_ESTIMATOR)
     Serial.print(SoC / 100);
@@ -451,8 +475,9 @@ void startCellComms(uint16_t interval) {
     payload += "\t\"heater\": \"";            // 12 chars - 146 total
     payload += digitalRead(HEATER_PIN);       // 1 chars - 147 total
     payload += "\",\r";                       // 3 chars - 150 total
-    payload += "\t\"disconnect\": \"";        // 16 chars - 166 total
-    payload += digitalRead(DISCONNECT_PIN);   // 1 chars - 167 total
+    payload += "\t\"disconnect\": \"";        // 16 chars - 166 total   TODO: need to rename 'connect'
+//    payload += digitalRead(DISCONNECT_PIN);   // 1 chars - 167 total
+    payload += digitalRead(CONNECT_PIN);      // 1 chars - 167 total
     payload += "\",\r";                       // 2 chars - 169 total
     payload += "\t\"sent mean\": \"";         // 16 chars - 185 total
     payload += sentVoltage;   // what we send as the mean to the cells
@@ -484,7 +509,6 @@ void startCellComms(uint16_t interval) {
     char attributes[1150];                    // actually 1140 chars
     payload.toCharArray( attributes, 1150 );
     Serial1.println( attributes );
-
   
   } // end of all cells read successfully
   else {
@@ -608,6 +632,7 @@ void    beeper(void) {
 //      relaxedTime         = 0;
 //    } // end of if enough current to use
 //    else  if ( (aveMilliAmps < 100) && (aveMilliAmps > -100) )
+#endif  // (0 != READ_CURRENT)
     {
       ++relaxedTime;
       if ( (relaxedTime > (60 * 5))   // 5 minutes
@@ -624,21 +649,27 @@ void    beeper(void) {
         }
         else {
           if (SoC > socArray[1]) {
-            SoC           = socArray[1];
+//            SoC           = socArray[1];
+            SoC           -= ((SoC - socArray[1]) / 2);
           }
           else if (SoC < socArray[2]) {
-            SoC           = socArray[2];
+//            SoC           = socArray[2];
+            SoC           += ((socArray[2] - SoC) / 2);
           }
           else if (SoC < socArray[0]) {
             if ((SoC + 10) < socArray[0]) {
-              SoC         += 2;
+//              SoC         += 2;
+              SoC         += ((socArray[0] - SoC) / 5);
             }
             else {
               ++SoC;
             }
           }
           else if (SoC > socArray[0]) {
-            if (SoC > 0) {
+            if (SoC > (socArray[0] + 10)) {
+              SoC         -= ((SoC - socArray[0]) / 5);
+            }
+            else if (SoC > 0) {
               --SoC;
             }
           }
@@ -648,7 +679,6 @@ void    beeper(void) {
         socInitialised    = 1;
       }
     } // end of else low current
-#endif  // (0 != READ_CURRENT)
   } // end of updateSoC ------------------------------
 #endif  // (0 != SOC_ESTIMATOR)
 
@@ -754,7 +784,7 @@ void    beeper(void) {
     lcd.print("A  ");
 #endif  // READ_CURRENT
 #if (0 != SOC_ESTIMATOR)
-    int pos = 16;
+    int pos       = 16;
     if (SoC < SOC_MAX) {    // <100% 
       ++pos;
     }
@@ -762,7 +792,9 @@ void    beeper(void) {
       ++pos;
     }
     lcd.setCursor(pos, 2);
-    lcd.print(SoC / 100);   // only show whole percentages
+    unsigned int tempSoC   = (SoC + (SoC / 200)) / 100;   // only show whole percentages
+//    lcd.print(SoC / 100);   // only show whole percentages
+    lcd.print(tempSoC);
     lcd.print("%");
 #endif  // (0 != SOC_ESTIMATOR)
 #else // DETAILED_INFO
