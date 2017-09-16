@@ -38,6 +38,9 @@ class CellComms
 	CellComms(void);
 	void sendMillivolts(int millivolts);
 	int readCells(void);
+	int getCellV(uint8_t cell);
+	int getCellT(uint8_t cell);
+	int getCellLoad(uint8_t cell);
 	int getCellsAveV(void);
 	int getCellsMinV(void);
 	int getCellsMaxV(void);
