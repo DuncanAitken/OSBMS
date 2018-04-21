@@ -19,24 +19,25 @@
 	for the message to propogate through the battery.
 ***********************************************************/
 
+
 #ifndef CellComms_h
 #define CellComms_h
+
 
 #include "Arduino.h"
 
 
-
-//#define CELL_BAUD			9600
-#define CELL_BAUD			19200	// Cell Monitors from v2.0 onwards are capable of 19200 baud
-#define NUM_CELLS			16
+#define MAX_CELLS			84
+// interlacing is not possible with comms version 2 as it requires 6 byte data blocks.
 //#define INTERLACING		1		// comment this to disable bitwise interlacing
 
 
 class CellComms
 {
   public:
-	CellComms(void);
+	CellComms(byte numCells, unsigned long baud, byte commVer);
 	void sendMillivolts(int millivolts);
+	void sendTemperature(void);
 	int readCells(void);
 	int getCellV(uint8_t cell);
 	int getCellT(uint8_t cell);

@@ -13,6 +13,7 @@ CellComms			KEYWORD1
 #######################################
 
 sendMillivolts    	KEYWORD2
+sendTemperature    	KEYWORD2
 readCells    		KEYWORD2
 getCellV    		KEYWORD2
 getCellT    		KEYWORD2
@@ -37,3 +38,5 @@ getMaxTCell			KEYWORD2
 #######################################
 
 NUM_CELLS			LITERAL1
+CELL_BAUD			LITERAL1
+MAX_CELLS			LITERAL1
