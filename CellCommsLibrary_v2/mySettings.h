@@ -1,9 +1,9 @@
 
 // Options
 #define debug             (1)       // enable this to have debug messages sent on serial0
-#define LCD_DISPLAY       (1)       // 0 = No LCD display, 1 = LCD display fitted
+#define LCD_DISPLAY       (0)       // 0 = No LCD display, 1 = LCD display fitted
 #define DETAILED_INFO     (0)       // 0 = easy to read display, 1 = lots of info on screen
-#define READ_CURRENT      (1)       // enable this to sample a current sensor on an ADC pin. The pin in set in the assignments section
+#define READ_CURRENT      (0)       // enable this to sample a current sensor on an ADC pin. The pin in set in the assignments section
 #define ACTIVE_BALANCING  (1)       // enable this to balance the cells all the time, otherwise top balancing only.
 #define SOC_ESTIMATOR     (1)       // 1 = estimate State-of-Charge, 0 = disable.
 #define SHOW_BARGRAPH     (1)       // shows a bargraph of the SoC on the bottom row of the display.
@@ -11,7 +11,7 @@
 #define TEMP_MSG_PERIOD		(10)	  // request the temperature every x messages
 
 // Settings
-#define NUM_CELLS         16
+#define NUM_CELLS         6
 //#define CELL_BAUD       9600
 #define CELL_BAUD         19200     // Cell Monitors from v2.0 onwards are capable of 19200 baud
 #define BATT_MAH          (35000)   // 35Ah or 35,000mAh. yours may be larger!

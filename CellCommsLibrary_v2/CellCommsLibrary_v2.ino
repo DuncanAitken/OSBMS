@@ -601,7 +601,10 @@ void    beeper(void) {
           || (0 == socInitialised) ) {
         // read Voc
         unsigned int Voc = cellMeanMillivolt;
+//        unsigned int Voc = cells.getCellsMinV();
+#if (READ_CURRENT != 0)
         Voc   -= (aveMilliAmps / 50);
+#endif
         
         // TODO: need to add a compensation for temperature
   
